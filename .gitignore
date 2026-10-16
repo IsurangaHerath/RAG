@@ -1,0 +1,126 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+sdist/
+wheels/
+pip-wheel-metadata/
+*.manifest
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.virtualenv/
+.env/
+pyvenv.cfg
+
+# ---------- Secrets & config ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+config.local.*
+*.keystore
+
+# ---------- Tests, type checkers, linters ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.hypothesis/
+.tox/
+.nox/
+coverage/
+*.cover
+
+# ---------- Caches ----------
+__pypackages__/
+.cache/
+.ipynb_checkpoints/
+*.ipynb_hidden/
+.dmypy.json
+dmypy.json
+
+# ---------- IDE / editor ----------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+.history/
+
+# ---------- OS junk ----------
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- Logs ----------
+logs/
+*.log
+log/
+logsmkdir/
+
+# ---------- Local databases & state ----------
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+*.duckdb
+
+# ---------- Generated data (RAG project specifics) ----------
+data/*
+!data/.gitkeep
+uploads/
+chroma_data/
+*.chroma/
+persist_directory/
+vector_store/
+models/
+checkpoints/
+*.bin
+*.gguf
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.pickle
+joblib/
+
+# ---------- Generated artifacts ----------
+notebooks/generated/
+outputs/
+result/
+results/
+tmp/
+temp/
+.cache/
+
+# ---------- Environment-specific (never commit) ----------
+local_settings.py
+.python-version
