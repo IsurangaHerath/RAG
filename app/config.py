@@ -21,12 +21,21 @@ from pathlib import Path
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.domain.errors import ConfigurationError
+
 # Repository root: this file is <root>/app/config.py
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-class SettingsError(RuntimeError):
-    """Raised when configuration is present but invalid or unusable."""
+class SettingsError(ConfigurationError):
+    """Raised when configuration is present but invalid or unusable.
+
+    Inherits from :class:`~app.domain.errors.ConfigurationError`, so callers
+    can catch either the specific or the general error. It remains a
+    ``RuntimeError``, matching its behaviour when introduced in Stage 06.
+    """
+
+    default_code = "configuration_error"
 
 
 class Settings(BaseSettings):
@@ -152,9 +161,7 @@ class Settings(BaseSettings):
         level = value.strip().upper()
         allowed = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
         if level not in allowed:
-            raise ValueError(
-                f"log_level must be one of {sorted(allowed)}; got {value!r}"
-            )
+            raise ValueError(f"log_level must be one of {sorted(allowed)}; got {value!r}")
         return level
 
     @field_validator("chat_model", "embedding_model")

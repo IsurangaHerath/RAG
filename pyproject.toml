@@ -1,0 +1,101 @@
+[project]
+name = "technical-document-intelligence-rag"
+version = "0.1.0"
+description = "Retrieval-Augmented Generation pipeline for technical documents with grounded, cited answers."
+readme = "ARCHITECTURE.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+# NOTE: runtime dependencies are deliberately NOT declared here.
+# requirements.txt is the single source of truth and is asserted by
+# tests/unit/test_environment.py. Keeping two lists would let them drift.
+
+[dependency-groups]
+dev = [
+    "ruff==0.17.1",
+    "mypy==2.4.0",
+    "pytest-cov==7.1.0",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff: one tool for linting (finding problems) and formatting (fixing style)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+# Exclude the virtualenv and generated data from every ruff command.
+# "*.md" matters: `ruff format` reformats Python code blocks inside Markdown.
+# ARCHITECTURE.md holds illustrative Protocol signatures that are deliberately
+# compact, so formatting would churn the design spec for no benefit.
+extend-exclude = [".venv", "data", "docs", "*.md"]
+
+[tool.ruff.lint]
+# E/W  -> pycodestyle basics (line length, whitespace)
+# F    -> Pyflakes (unused imports, undefined names) — catches real bugs
+# I    -> isort (import order, so merges don't fight over placement)
+# UP   -> pyupgrade (modern Python 3.12 syntax)
+# B    -> flake8-bugbear (common footguns like mutable default arguments)
+# C4   -> comprehensions (simpler dict/set construction)
+# RUF  -> ruff-specific rules
+select = ["E", "F", "W", "I", "UP", "B", "C4", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use broad exception types and unused fixtures.
+"tests/**" = ["B011", "SIM115"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ---------------------------------------------------------------------------
+# mypy: static type checking. `app/` is held to full strictness because its
+# Protocol interfaces are the contract every later stage builds on.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+show_error_codes = true
+pretty = true
+exclude = ["\\.venv", "data"]
+
+[[tool.mypy.overrides]]
+# Test files are intentionally loose: fixtures are untyped and tests favour
+# brevity over annotation completeness.
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+# -ra -> summary of non-passing tests; strict markers -> typo'd marks fail loudly
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "live: calls the real OpenAI API; requires OPENAI_API_KEY (deselected by default)",
+]
+filterwarnings = [
+    "error",
+]
+
+# ---------------------------------------------------------------------------
+# coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

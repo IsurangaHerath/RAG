@@ -336,7 +336,5 @@ def test_every_documented_env_example_key_is_a_settings_field() -> None:
         key = line.split("=", 1)[0].strip()
         documented.add(key.lower())
 
-    unknown = {
-        key for key in documented if key.lower() not in {f.lower() for f in field_names}
-    }
+    unknown = {key for key in documented if key.lower() not in {f.lower() for f in field_names}}
     assert not unknown, f".env.example documents unknown settings: {sorted(unknown)}"

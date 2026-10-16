@@ -114,9 +114,7 @@ def test_no_module_is_empty_placeholder() -> None:
         meaningful = [
             line
             for line in text.splitlines()
-            if line.strip()
-            and not line.strip().startswith("#")
-            and line.strip() != '"""'
+            if line.strip() and not line.strip().startswith("#") and line.strip() != '"""'
         ]
 
         if len(meaningful) < 3:
