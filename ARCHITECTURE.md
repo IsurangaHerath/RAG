@@ -333,7 +333,44 @@ Sources are returned *unconditionally*, even when the model declines to answer, 
 
 ## 7. Dependencies
 
-### 7.1 Installed now (Stage 05 — verified importable)
+### 7.0 Configuration (Stage 06 — implemented)
+
+Configuration lives in `app/config.py` as a `pydantic-settings` `Settings`
+class. Nothing else in the codebase reads `os.environ` directly.
+
+**Source priority:** real environment variables → local `.env` file → field defaults.
+
+```python
+from app.config import get_settings
+settings = get_settings()          # cached, one instance per process
+settings.require_openai_key()      # raises SettingsError with a fix hint
+settings.ensure_directories()      # idempotent, called once at startup
+log.info("cfg", extra={"s": settings.redacted()})   # key is masked
+```
+
+| Group | Key settings | Notes |
+|---|---|---|
+| Provider | `OPENAI_API_KEY` (`SecretStr`), `CHAT_MODEL`, `EMBEDDING_MODEL`, `REQUEST_TIMEOUT_SECONDS`, `MAX_OUTPUT_TOKENS` | key is never serialized in the clear |
+| Paths | `DATA_DIR`, `CHROMA_PERSIST_DIR`, `SAMPLE_DOCS_DIR` | sub-paths derive from `DATA_DIR` unless set explicitly; all resolved absolute |
+| Chunking | `CHUNK_SIZE` (1000), `CHUNK_OVERLAP` (150) | validated `overlap < size` |
+| Retrieval | `TOP_K` (5), `RETRIEVAL_THRESHOLD` (None) | threshold disabled until calibrated |
+| HTTP limits | `MAX_UPLOAD_MB` (20), `MAX_QUERY_CHARS` (4000), `API_HOST`, `API_PORT` | |
+| Logging | `LOG_LEVEL` (INFO), `LOG_DOCUMENT_CONTENT` (False) | content logging stays off by default |
+
+**Secret handling.** `OPENAI_API_KEY` is a `pydantic.SecretStr`, so `repr`,
+`str`, `model_dump()`, `model_dump_json()` and `redacted()` all mask it.
+Verified by tests in `tests/unit/test_config.py`, including a real logger
+handler round-trip. `Settings.redacted()` is the only dict intended for logs.
+
+**Validation** runs at construction, so bad config fails at startup with a
+message naming the field — not mid-request. Examples: `chunk_overlap >=
+chunk_size`, an unknown `LOG_LEVEL`, `TOP_K=0`, an empty model name.
+
+**Files:** `.env.example` (committed, placeholders only) → copy to `.env`
+(git-ignored). `Settings` never requires `.env` to exist, so CI and
+containerised runs can configure purely through environment variables.
+
+### 7.1 Installed now (Stage 06 — verified importable)
 
 | Layer | Package | Pinned version | Purpose |
 |---|---|---|---|
@@ -347,6 +384,7 @@ Sources are returned *unconditionally*, even when the model declines to answer, 
 | Web | `fastapi` | 0.143.3 | REST API |
 | | `uvicorn[standard]` | 0.54.0 | ASGI server |
 | | `pydantic` | 2.14.1 | request/response validation |
+| Config | `pydantic-settings` | 2.16.0 | typed `.env` settings (Stage 06) |
 | Data science | `numpy` | 2.5.4 | vector maths |
 | | `pandas` | 3.0.6 | experiment tables |
 | | `scikit-learn` | 1.9.1 | evaluation metrics |
@@ -355,7 +393,7 @@ Sources are returned *unconditionally*, even when the model declines to answer, 
 Environment: **Python 3.12.2**, Windows, virtualenv at `.venv/`.
 
 `requirements.txt` pins direct dependencies with `==`.
-`requirements.lock.txt` records all 122 transitive packages for exact
+`requirements.lock.txt` records all transitive packages for exact
 reproduction.
 
 ### 7.2 Installation commands (Windows / PowerShell)
@@ -396,7 +434,6 @@ interpreter that lacks the dependencies.
 | Layer | Package | Needed from stage | Purpose |
 |---|---|---|---|
 | Web | `python-multipart` | 55 | multipart document upload |
-| Config | `pydantic-settings` | 06 | validated `.env` settings |
 | Docs | `pypdf`, `python-docx`, `beautifulsoup4` | 11–12 | PDF/DOCX/HTML parsing |
 | Ops | `structlog`, `tenacity` | 16 / 21 | logging, bounded retries |
 | Test | `pytest-cov`, `pytest-asyncio` | 07 | coverage, async tests |
