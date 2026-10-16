@@ -1,0 +1,50 @@
+name: CI
+
+# Minimal automated test workflow (Stage 07).
+# Runs the same four checks a developer runs locally, so a green local run
+# and a green build mean the same thing.
+#
+# No OPENAI_API_KEY is configured here on purpose: the test suite must pass
+# without calling the paid API. Tests marked `live` are excluded.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: lint · types · tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Keep this in sync with requires-python in pyproject.toml.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Ruff format check
+        run: python -m ruff format --check .
+
+      - name: Ruff lint
+        run: python -m ruff check .
+
+      - name: Mypy type check
+        run: python -m mypy app
+
+      - name: Pytest
+        run: python -m pytest --cov=app --cov-report=term-missing -q

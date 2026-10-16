@@ -68,9 +68,7 @@ def test_requirements_txt_pins_every_dependency() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "distribution", REQUIRED_PACKAGES, ids=REQUIRED_PACKAGES.keys()
-)
+@pytest.mark.parametrize("distribution", REQUIRED_PACKAGES, ids=REQUIRED_PACKAGES.keys())
 def test_direct_dependency_is_installed(distribution: str) -> None:
     """Each declared dependency is installed in the active environment."""
     try:
@@ -84,9 +82,7 @@ def test_direct_dependency_is_installed(distribution: str) -> None:
     assert version, f"{distribution} reported an empty version"
 
 
-@pytest.mark.parametrize(
-    "distribution", REQUIRED_PACKAGES, ids=REQUIRED_PACKAGES.keys()
-)
+@pytest.mark.parametrize("distribution", REQUIRED_PACKAGES, ids=REQUIRED_PACKAGES.keys())
 def test_direct_dependency_imports(distribution: str) -> None:
     """Each declared dependency imports without raising."""
     module_name = REQUIRED_PACKAGES[distribution]

@@ -1,0 +1,7 @@
+# Development / CI tooling — NOT required to run the application.
+# Install with:  python -m pip install -r requirements-dev.txt
+#
+# Runtime dependencies live in requirements.txt and are pinned there.
+ruff==0.17.1
+mypy==2.4.0
+pytest-cov==7.1.0

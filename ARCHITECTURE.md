@@ -445,6 +445,52 @@ LangChain imports stay isolated to adapter modules (`ingestion/*`,
 `tests/unit/test_environment.py`. Upgrades should touch one layer only.
 
 
+### 7.4 Code quality standards (Stage 07 — implemented)
+
+Configuration lives in `pyproject.toml` (one file for all tools).
+
+| Tool | Version | Command | Purpose |
+|---|---|---|---|
+| Ruff (format) | 0.17.1 | `python -m ruff format .` | deterministic whitespace/import layout |
+| Ruff (lint) | 0.17.1 | `python -m ruff check .` | E/W pycodestyle, F Pyflakes, I isort, UP pyupgrade, B bugbear, C4, RUF |
+| mypy | 2.4.0 | `python -m mypy app` | `strict = true` on `app/`; looser for `tests/` |
+| pytest | 9.1.1 | `python -m pytest` | `--strict-markers --strict-config`, `filterwarnings = error` |
+| coverage | 7.16.2 | `python -m pytest --cov=app` | branch coverage, `show_missing` |
+
+**One command for everything (Windows):**
+
+```powershell
+.\scripts\check.ps1          # format check → lint → mypy → pytest+coverage
+.\scripts\check.ps1 -Fix     # auto-format and auto-fix lint issues first
+.\scripts\check.ps1 -SkipTypes   # fast inner loop while iterating
+```
+
+Dev-only packages are in `requirements-dev.txt`, **not** `requirements.txt`,
+so a production install never pulls in linters. Lock file
+(`requirements.lock.txt`) captures all 130 packages including dev tools.
+
+**Error-handling convention.** Every deliberate failure raises a subclass
+of `app.domain.errors.RAGError` (rooted on `RuntimeError` so Stage 06's
+`SettingsError` stays compatible). Each subclass carries:
+
+* `code` — stable machine-readable identifier (`"not_found"`), never prose
+* `http_status` — what the API layer should respond with
+* `detail` — developer context, **excluded from responses by default**
+* `to_dict()` — JSON payload; `include_detail=True` only when logging server-side
+
+| Class | Status | Use |
+|---|---|---|
+| `ConfigurationError` / `SettingsError` | 500 | bad or missing config |
+| `ValidationError` | 400 (422 override) | caller supplied bad input |
+| `NotFoundError` | 404 | missing document/chunk |
+| `DependencyError` | 502 | OpenAI/Chroma unreachable |
+| `ProviderRateLimitError` | 503 | retry later |
+| `ProviderAuthenticationError` | 502 | bad provider credentials |
+
+**CI** (`.github/workflows/ci.yml`): runs the same four checks on push/PR to
+`main` under Python 3.12, with **no API key** — proving the suite is free of
+paid calls. Tests marked `live` are excluded by design.
+
 ## 8. Testing Strategy (pytest)
 
 | Layer | What | How |
