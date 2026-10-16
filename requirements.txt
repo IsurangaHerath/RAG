@@ -1,0 +1,38 @@
+# Technical Document Intelligence RAG — direct dependencies
+# Stage 05: environment setup.
+#
+# Every entry is pinned with `==` so a fresh install reproduces the exact
+# versions this project was developed and tested against.  Transitive
+# dependencies (what these packages pull in themselves) are captured
+# separately in requirements.lock.txt.
+#
+# Verified against Python 3.12.2 on Windows.
+
+# ---- LangChain ------------------------------------------------------------
+# LangChain 1.x is a major restructure: chat models, embeddings and core
+# primitives live in langchain-core / langchain-openai rather than in the
+# monolithic 0.x `langchain` package.
+langchain==1.4.6
+langchain-core==1.6.11
+langchain-openai==1.7.2
+langchain-text-splitters==1.1.3
+
+# ---- OpenAI ---------------------------------------------------------------
+openai==3.31.0
+
+# ---- Vector store ---------------------------------------------------------
+chromadb==1.5.9
+langchain-chroma==1.1.0
+
+# ---- Web API --------------------------------------------------------------
+fastapi==0.143.3
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+
+# ---- Data science / evaluation -------------------------------------------
+numpy==2.5.4
+pandas==3.0.6
+scikit-learn==1.9.1
+
+# ---- Testing --------------------------------------------------------------
+pytest==9.1.1

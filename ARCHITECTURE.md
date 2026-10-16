@@ -333,18 +333,80 @@ Sources are returned *unconditionally*, even when the model declines to answer, 
 
 ## 7. Dependencies
 
-| Layer | Package | Purpose |
-|---|---|---|
-| Web | `fastapi`, `uvicorn[standard]`, `python-multipart`, `pydantic`, `pydantic-settings` | API, validation, config |
-| RAG | `langchain`, `langchain-openai`, `langchain-chroma`, `langchain-text-splitters`, `langchain-community` | Runnables, OpenAI chat/embeddings, Chroma retriever, splitters |
-| Vector DB | `chromadb` | persistent HNSW index |
-| Docs | `pypdf`, `python-docx`, `beautifulsoup4`, `unstructured` (or `pymupdf4llm` for layout-aware PDF) | parsing |
-| Queue | `arq` (+ Redis) — optional; `fastapi` BackgroundTasks in dev | async ingest |
-| Ops | `structlog`, `httpx`, `tenacity` | logging, HTTP client, retries |
-| Test | `pytest`, `pytest-asyncio`, `pytest-cov`, `mongomock`-style fakes, `testcontainers` (opt.) | testing |
-| Quality (optional) | `ragas`, `sentence-transformers` (reranker), `tiktoken` | eval, rerank, token budgeting |
+### 7.1 Installed now (Stage 05 — verified importable)
 
-Version pinning via `pyproject.toml` + lockfile; LangChain APIs move fast — pin minor versions and keep all LangChain imports isolated to adapter modules (`ingestion/*`, `retrieval/*`, `generation/*`) so upgrades touch one layer.
+| Layer | Package | Pinned version | Purpose |
+|---|---|---|---|
+| RAG core | `langchain` | 1.4.6 | agent/chain orchestration |
+| | `langchain-core` | 1.6.11 | prompts, documents, Runnables |
+| | `langchain-openai` | 1.7.2 | `ChatOpenAI`, `OpenAIEmbeddings` |
+| | `langchain-text-splitters` | 1.1.3 | `RecursiveCharacterTextSplitter` |
+| | `langchain-chroma` | 1.1.0 | Chroma as a LangChain vector store |
+| LLM | `openai` | 3.31.0 | provider SDK |
+| Vector DB | `chromadb` | 1.5.9 | persistent HNSW index |
+| Web | `fastapi` | 0.143.3 | REST API |
+| | `uvicorn[standard]` | 0.54.0 | ASGI server |
+| | `pydantic` | 2.14.1 | request/response validation |
+| Data science | `numpy` | 2.5.4 | vector maths |
+| | `pandas` | 3.0.6 | experiment tables |
+| | `scikit-learn` | 1.9.1 | evaluation metrics |
+| Test | `pytest` | 9.1.1 | test runner |
+
+Environment: **Python 3.12.2**, Windows, virtualenv at `.venv/`.
+
+`requirements.txt` pins direct dependencies with `==`.
+`requirements.lock.txt` records all 122 transitive packages for exact
+reproduction.
+
+### 7.2 Installation commands (Windows / PowerShell)
+
+```powershell
+cd D:\Projects\RAG
+
+# 1. create the virtual environment (once)
+python -m venv .venv
+
+# 2. activate it
+.\.venv\Scripts\Activate.ps1
+#    If PowerShell blocks activation, run once, then re-open:
+#    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+
+# 3. install dependencies
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+# 4. verify
+python -m pytest tests/ -q
+```
+
+For an exact reproduction of the tested environment:
+
+```powershell
+python -m pip install -r requirements.lock.txt
+```
+
+cmd.exe users: activate with `.venv\Scripts\activate.bat` instead.
+
+**Always run tools from inside the venv.** Prefixing with
+`.\.venv\Scripts\python.exe -m pytest` avoids accidentally using a global
+interpreter that lacks the dependencies.
+
+### 7.3 Planned additions (not yet installed)
+
+| Layer | Package | Needed from stage | Purpose |
+|---|---|---|---|
+| Web | `python-multipart` | 55 | multipart document upload |
+| Config | `pydantic-settings` | 06 | validated `.env` settings |
+| Docs | `pypdf`, `python-docx`, `beautifulsoup4` | 11–12 | PDF/DOCX/HTML parsing |
+| Ops | `structlog`, `tenacity` | 16 / 21 | logging, bounded retries |
+| Test | `pytest-cov`, `pytest-asyncio` | 07 | coverage, async tests |
+| Quality (opt.) | `ragas`, `tiktoken`, `sentence-transformers` | 45–52 / 31 | eval, token budgeting, rerank |
+
+LangChain 1.x moved classes that lived in `langchain` during 0.x, so all
+LangChain imports stay isolated to adapter modules (`ingestion/*`,
+`retrieval/*`, `generation/*`) and are asserted by
+`tests/unit/test_environment.py`. Upgrades should touch one layer only.
+
 
 ## 8. Testing Strategy (pytest)
 
