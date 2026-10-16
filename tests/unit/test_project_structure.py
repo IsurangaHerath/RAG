@@ -96,20 +96,35 @@ def test_data_dirs_are_not_python_packages(dirname: str) -> None:
 
 
 def test_no_module_is_empty_placeholder() -> None:
-    """Guard against premature abstraction: only ``__init__.py`` files ship in Stage 04.
+    """Guard against placeholder rot: every module must contain real code.
 
-    Later stages add the real modules.  Keeping this assertion means the
-    scaffold cannot silently fill up with empty placeholder files.
+    In Stage 04 this test asserted that *no* implementation modules existed,
+    which correctly prevented scaffolding from filling with empty files.
+    Stages now add real modules, so the invariant has been narrowed to the
+    part that still matters: no zero-byte or comment-only ``.py`` files.
     """
-    python_files = [
-        path
-        for path in (ROOT / "app").rglob("*.py")
-        if path.name != "__init__.py"
-    ]
+    placeholders: list[str] = []
 
-    assert not python_files, (
-        "Stage 04 must not add implementation modules yet; found: "
-        + ", ".join(str(p.relative_to(ROOT)) for p in python_files)
+    for path in (ROOT / "app").rglob("*.py"):
+        if path.name == "__init__.py":
+            # Package markers are legitimately a single docstring line.
+            continue
+
+        text = path.read_text(encoding="utf-8")
+        meaningful = [
+            line
+            for line in text.splitlines()
+            if line.strip()
+            and not line.strip().startswith("#")
+            and line.strip() != '"""'
+        ]
+
+        if len(meaningful) < 3:
+            placeholders.append(str(path.relative_to(ROOT)))
+
+    assert not placeholders, (
+        "These modules look like empty placeholders rather than real code: "
+        + ", ".join(placeholders)
     )
 
 

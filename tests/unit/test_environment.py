@@ -31,6 +31,7 @@ REQUIRED_PACKAGES: dict[str, str] = {
     "fastapi": "fastapi",
     "uvicorn": "uvicorn",
     "pydantic": "pydantic",
+    "pydantic-settings": "pydantic_settings",
     "numpy": "numpy",
     "pandas": "pandas",
     "scikit-learn": "sklearn",

@@ -29,6 +29,10 @@ fastapi==0.143.3
 uvicorn[standard]==0.54.0
 pydantic==2.14.1
 
+# ---- Configuration (Stage 06) ---------------------------------------------
+# Reads .env / environment variables into the typed Settings object.
+pydantic-settings==2.16.0
+
 # ---- Data science / evaluation -------------------------------------------
 numpy==2.5.4
 pandas==3.0.6
