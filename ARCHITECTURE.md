@@ -141,25 +141,73 @@ Dependency rule: `api → (retrieval, generation, storage) → domain`; `ingesti
 
 Interfaces are Python `typing.Protocol` contracts (signatures only — implementation deferred).
 
-### 5.1 Domain models (`domain/models.py`)
+### 5.1 Domain models (`domain/models.py`) — implemented in Stage 09
+
+Framework-free (no FastAPI/LangChain/pydantic imports). Immutable records.
 
 ```python
-@dataclass(frozen=True)
-class Document:      doc_id: str; filename: str; media_type: str
-                     sha256: str; created_at: datetime; metadata: dict
-@dataclass(frozen=True)
-class Chunk:         chunk_id: str; doc_id: str; text: str
-                     page: int | None; section: str | None; metadata: dict
-@dataclass(frozen=True)
-class RetrievedChunk: chunk: Chunk; score: float; source: str      # "chroma" | "rerank"
-@dataclass(frozen=True)
-class Citation:      doc_id: str; chunk_id: str; page: int | None; quote: str
-@dataclass(frozen=True)
-class Answer:        text: str; citations: list[Citation]
-                     usage: TokenUsage; model: str; latency_ms: int
-                     grounded: bool                                # passed grounding check
-class IngestStatus:  PENDING | PARSING | INDEXING | INDEXED | FAILED
+class IngestStatus(StrEnum):
+    PENDING | PARSING | INDEXING | INDEXED | FAILED   # .is_terminal for the last two
+
+@dataclass(frozen=True, slots=True)
+class Document:
+    doc_id: str            # 'doc_' + 16 hex, derived from SOURCE PATH (see below)
+    filename: str          # basename only, never a path
+    media_type: str        # validated MIME type
+    content: str           # extracted text; may be empty -> .is_empty
+    metadata: Mapping[str, str | int | float | bool]   # JSON scalars only
+    created_at: datetime   # timezone-aware (naive rejected)
+    status: IngestStatus = PENDING
+    content_sha256: str    # derived from CONTENT
+    source_path: str       # relative to data_dir, '\' normalised to '/'
+    page_count: int | None
+    error: str | None      # required iff status == FAILED
+    ingested_at: datetime | None   # required iff status == INDEXED
+
+    # factory (validates, derives both identifiers)
+    Document.create(source_path=..., filename=..., media_type=..., content=..., ...)
+    # derived: .char_count .is_empty .is_supported .is_terminal .summary()
+    # lifecycle: .with_status(...) .allowed_transitions()
 ```
+
+**Why two identifiers.** `doc_id` hashes the *source path*; `content_sha256`
+hashes the *bytes*. If `doc_id` were content-derived, editing a file would
+produce a brand-new document and its stale chunks would linger in the index
+forever. With path-derived ids, an edit keeps the same `doc_id` (so Stage 23
+can replace old chunks) while `content_sha256` changes (so Stage 15 detects
+the edit). A rename changes `doc_id` but not the hash — that is exactly how
+Stage 15 distinguishes *renamed* from *modified*.
+
+**Status lifecycle** (terminal states accept no further transitions):
+
+```
+PENDING ──▶ PARSING ──▶ INDEXING ──▶ INDEXED   (terminal)
+   │           │            │
+   └───────────┴────────────┴──────▶ FAILED    (terminal, requires error)
+```
+
+`with_status()` returns a *new* record (`frozen=True` forbids assignment),
+so one worker can never mutate a record another is reading. Validation
+enforces cross-field rules: `error` allowed only on `FAILED`, `ingested_at`
+required on `INDEXED`.
+
+**Validation rejects:** malformed `doc_id`, filename containing separators /
+control characters / `..`, non-MIME `media_type`, naive datetimes, negative
+`page_count`, absolute or traversal `source_path`, non-scalar or nested
+metadata, and `status` not an `IngestStatus`. Errors are
+`app.domain.errors.ValidationError` with a stable `code`.
+
+**`summary()` deliberately omits `content` and `content_sha256`** so document
+text can never reach a log line or an API list payload.
+
+Helpers: `make_doc_id(path)`, `make_chunk_id(doc_id, index)`,
+`content_sha256(bytes|str)`, `SUPPORTED_MEDIA_TYPES`,
+`EXTENSION_TO_MEDIA_TYPE`.
+
+**Not yet created** (arrive with their own stages, still planned):
+`Chunk` → Stage 18, `RetrievedChunk` → Stage 30, `Citation` + `Answer` →
+Stage 43, `TokenUsage` → Stage 51. `make_chunk_id()` already exists so
+Stage 18 can use the agreed id format immediately.
 
 ### 5.2 Ingestion
 
