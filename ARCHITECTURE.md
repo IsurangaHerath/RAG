@@ -76,7 +76,8 @@ RAG/
 │   │   └── errors.py        # Stage 07: error taxonomy (UploadError, ParseError, DocumentLoadError, ...)
 │   ├── ingestion/           # Stages 10–16
 │   │   ├── discovery.py     # find supported files, block path traversal
-│   │   ├── loaders.py       # Stage 11: TXT/MD -> TextDocument; PDF lands in Stage 12
+│   │   ├── loaders.py       # Stage 11: TXT/MD -> TextDocument; re-exports load_pdf
+pdf_loader.py    # Stage 12: PDF -> per-page text via pypdf
 │   │   ├── metadata.py      # normalise filename/type/source path
 │   │   ├── deduplication.py # stable IDs + content hashes
 │   │   ├── service.py       # orchestrates discovery → load → metadata
@@ -284,8 +285,8 @@ yields identical ordering — required for stable ids in Stage 23.
 
 ### 5.2.2 Text loaders (`ingestion/loaders.py`) — implemented in Stage 11
 
-Loads `.txt` / `.md`. PDF is deferred to Stage 12 and rejected here with an
-actionable message rather than being decoded as text.
+Loads `.txt` / `.md`. PDF has its own loader (§5.2.3); asking this module for
+a PDF fails with an actionable message rather than decoding bytes as text.
 
 ```python
 load_text(path, *, media_type=None, normalize_newlines=True) -> TextDocument
@@ -339,9 +340,79 @@ NUL bytes are rejected rather than decoded because a `.docx` or image given a
 `TextDocument` with `is_empty == True`; Stage 14 reports such files as *skipped*
 rather than failing the batch.
 
-**Out of scope:** OCR. A scanned PDF has no extractable text, and inventing
-placeholder text for it would poison the index with fabricated content. It
-raises a typed error so the file can be marked *skipped* with an honest reason.
+**Out of scope:** OCR. A scanned *image* has no extractable text, and
+inventing placeholder text for it would poison the index with fabricated
+content. A text file that cannot be decoded raises a typed error so it can be
+marked *skipped* with an honest reason. (A scanned *PDF* is a different case —
+see below — because the file is perfectly readable, it simply has no text
+layer.)
+
+### 5.2.3 PDF loader (`ingestion/pdf_loader.py`) — implemented in Stage 12
+
+Turns a PDF into page-tagged text using `pypdf`. Re-exported from
+`ingestion/loaders.py` as `load_pdf` so callers have one import site.
+
+```python
+load_pdf(path, *, password=None, media_type=None) -> PdfDocument
+can_load_pdf(media_type) -> bool
+
+@dataclass(frozen=True, slots=True)
+class PdfPage:
+    page_number: int     # 1-based, as a citation reads
+    text: str            # "" when the page has no text layer
+    # .char_count .is_empty
+
+@dataclass(frozen=True, slots=True)
+class PdfDocument:
+    pages: tuple[PdfPage, ...]   # always page_count entries, in order
+    media_type; byte_size; encrypted; failed_pages: tuple[int, ...]; source_name
+    # .page_count .text .char_count .has_text_layer .is_empty .summary()
+
+PDF_MEDIA_TYPE = "application/pdf"
+```
+
+**Pages are kept, not flattened.** PDF is the one format here where a citation
+can plausibly say "see page 7". Joining every page into one string would make
+that unrecoverable, so `pages` is authoritative and `.text` is only a
+convenience join. `pages[i].page_number == i + 1` always holds — even when a
+page fails to extract, it keeps its slot with empty text — which is what lets
+Stage 18 attach a page number to every chunk without extra bookkeeping.
+Numbering is **1-based** to match how people count; the deliberate mismatch
+with Python's zero-based indexing is documented and tested.
+
+**A missing text layer is reported, not raised.** A scanned PDF is a valid
+file with no text. It returns `has_text_layer == False` / `is_empty == True`
+(the PDF analogue of the empty-text-file case in §5.2.2) so Stage 14 can mark
+it *skipped*. Genuine failures — corrupt bytes, or encrypted with no usable
+password — still raise, because those are things a caller may need to act on.
+
+**Per-page failure isolation.** A single malformed page does not discard the
+document, but neither does it vanish: failures collect in `failed_pages`. If
+*every* page fails, nothing was extracted at all, which is a real error rather
+than a scan, so `invalid_pdf` is raised.
+
+**Errors** (all `DocumentLoadError` with HTTP 422 unless noted):
+
+| Condition | Code |
+| --- | --- |
+| Path missing / is a directory | `file_not_found` (`NotFoundError`) / `path_is_a_directory` (`ValidationError`) |
+| Non-PDF media type requested | `unsupported_media_type` (`ValidationError`) |
+| Encrypted, no password supplied | `pdf_encrypted` |
+| Encrypted, password rejected | `pdf_wrong_password` |
+| 0 bytes, corrupt, truncated, not really a PDF, unusable page tree, every page failed | `invalid_pdf` |
+
+`pdf_wrong_password` is a separate code from `pdf_encrypted` so a UI can
+distinguish "I cannot read this" from "that password was wrong" and re-prompt.
+pypdf signals a wrong password by *returning* a falsy value rather than
+raising, so the return value is checked explicitly.
+
+**Log noise.** pypdf logs warnings such as `invalid pdf header` before
+raising; each becomes a typed error carrying the real reason, so the `pypdf`
+logger is raised to ERROR for the duration of a read and restored afterwards.
+
+**Not implemented:** OCR (as above), form-field extraction, and PDF document
+metadata beyond what Stage 13 adds. `password` exists and is tested, but
+nothing supplies it yet — there is no password-management feature.
 
 ### 5.3 Storage
 
@@ -539,6 +610,7 @@ containerised runs can configure purely through environment variables.
 | | `langchain-chroma` | 1.1.0 | Chroma as a LangChain vector store |
 | LLM | `openai` | 3.31.0 | provider SDK |
 | Vector DB | `chromadb` | 1.5.9 | persistent HNSW index |
+| Parsing | `pypdf` | 6.21.1 | PDF text extraction, page by page (Stage 12) |
 | Web | `fastapi` | 0.143.3 | REST API |
 | | `uvicorn[standard]` | 0.54.0 | ASGI server |
 | | `pydantic` | 2.14.1 | request/response validation |

@@ -28,6 +28,7 @@ REQUIRED_PACKAGES: dict[str, str] = {
     "langchain-chroma": "langchain_chroma",
     "openai": "openai",
     "chromadb": "chromadb",
+    "pypdf": "pypdf",
     "fastapi": "fastapi",
     "uvicorn": "uvicorn",
     "pydantic": "pydantic",
