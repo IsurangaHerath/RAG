@@ -73,10 +73,10 @@ RAG/
 │   ├── main.py              # Stage 53: app factory, middleware, router registration
 │   ├── domain/
 │   │   ├── models.py        # Stage 09: Document, Chunk, RetrievedChunk, Citation, Answer
-│   │   └── errors.py        # Stage 07: error taxonomy (UploadError, ParseError, ...)
+│   │   └── errors.py        # Stage 07: error taxonomy (UploadError, ParseError, DocumentLoadError, ...)
 │   ├── ingestion/           # Stages 10–16
 │   │   ├── discovery.py     # find supported files, block path traversal
-│   │   ├── loaders.py       # TXT/MD/PDF → raw text + page metadata
+│   │   ├── loaders.py       # Stage 11: TXT/MD -> TextDocument; PDF lands in Stage 12
 │   │   ├── metadata.py      # normalise filename/type/source path
 │   │   ├── deduplication.py # stable IDs + content hashes
 │   │   ├── service.py       # orchestrates discovery → load → metadata
@@ -281,6 +281,67 @@ message uses the basename so absolute paths never escape); root is a file →
 
 **Determinism:** filenames are walked in sorted order, so repeated discovery
 yields identical ordering — required for stable ids in Stage 23.
+
+### 5.2.2 Text loaders (`ingestion/loaders.py`) — implemented in Stage 11
+
+Loads `.txt` / `.md`. PDF is deferred to Stage 12 and rejected here with an
+actionable message rather than being decoded as text.
+
+```python
+load_text(path, *, media_type=None, normalize_newlines=True) -> TextDocument
+load(path, *, media_type=None) -> TextDocument          # Stage 14-shaped alias
+can_load(media_type) -> bool
+media_type_for_path(path) -> str                        # .md -> text/markdown, else text/plain
+detect_newline_style(raw: bytes) -> str                 # crlf | cr | lf | mixed | none
+
+@dataclass(frozen=True, slots=True)
+class TextDocument:
+    text; media_type; encoding; had_bom; original_newlines; newlines_normalized
+    byte_size; source_name          # basename only, never an absolute path
+    # .char_count .line_count .is_empty .summary()
+
+TEXT_MEDIA_TYPES = frozenset({"text/plain", "text/markdown"})
+```
+
+**What it preserves.** Everything except line endings: headings, blank lines,
+indented code blocks and ``` fences survive byte-for-byte (asserted by a
+round-trip test). Chunking in Stage 18 depends on that structure, so a loader
+that tidied text would silently damage retrieval.
+
+**Line endings.** CRLF and lone-CR are rewritten to `\n` so Windows, macOS and
+Linux files behave identically downstream. CRLF is replaced *first*, otherwise
+a naive `\r -> \n` would produce blank lines. The original style is recorded in
+`original_newlines` and `normalize_newlines=False` keeps the bytes as stored.
+
+**Encoding.** Strict UTF-8. `utf-8-sig` decodes files with a byte-order mark and
+strips it (an unstripped BOM becomes a stray `U+FEFF` in the first chunk), with
+`had_bom` / `encoding` recording what happened. Decoding is strict on purpose:
+silently substituting `U+FFFD` would put corrupt text into the vector index
+where it is very hard to notice later.
+
+**Reported failures** (all subclass `RAGError`; the new
+`DocumentLoadError` maps to HTTP 422 because the request is fine, the *file*
+is not):
+
+| Condition | Error | Code |
+| --- | --- | --- |
+| Path missing | `NotFoundError` | `file_not_found` |
+| Path is a directory | `ValidationError` | `path_is_a_directory` |
+| Not a text media type | `ValidationError` | `unsupported_media_type` |
+| Permission denied / OS I/O error | `DocumentLoadError` | `permission_denied` / `unreadable_file` |
+| Bytes are not valid UTF-8 | `DocumentLoadError` | `encoding_error` |
+| NUL bytes (binary renamed `.txt`) | `DocumentLoadError` | `binary_content` |
+
+NUL bytes are rejected rather than decoded because a `.docx` or image given a
+`.txt` name would otherwise "succeed" and be indexed as garbage.
+
+**Empty is valid, not an error.** A zero-byte or whitespace-only file returns a
+`TextDocument` with `is_empty == True`; Stage 14 reports such files as *skipped*
+rather than failing the batch.
+
+**Out of scope:** OCR. A scanned PDF has no extractable text, and inventing
+placeholder text for it would poison the index with fabricated content. It
+raises a typed error so the file can be marked *skipped* with an honest reason.
 
 ### 5.3 Storage
 

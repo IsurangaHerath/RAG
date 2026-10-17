@@ -1,7 +1,8 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1–8 of a 60-stage plan are
-> complete. The ingestion, retrieval and answer-generation pipeline is
+> **Status: early-stage foundation.** Stages 1–11 of a 60-stage plan are
+> complete. File discovery, TXT and Markdown loading now work and are tested;
+> the rest of the ingestion, retrieval and answer-generation pipeline is
 > **designed but not yet implemented**, and no benchmark results exist yet.
 > See [Project status](#project-status) for exactly what does and does not work.
 
@@ -70,7 +71,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1–8):**
+**Implemented and tested (Stages 1–11):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -80,11 +81,17 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 - ✅ Secret handling: `SecretStr` + tests proving the key never reaches a log
 - ✅ One shared error hierarchy mapped to HTTP status codes
 - ✅ Lint / format / type-check / test workflow in one script, plus CI
-- ✅ **138 tests passing**, `app/` at 99% branch coverage
+- ✅ Document domain model: stable `doc_id`, content hashes, chunk IDs
+- ✅ Recursive file discovery that blocks path traversal and symlink escapes
+- ✅ TXT and Markdown loaders: strict UTF-8, BOM handling, line-ending
+  normalisation, formatting preserved byte-for-byte
+- ✅ Typed `DocumentLoadError` for unreadable, undecodable and mislabelled files
+- ✅ **301 tests passing**, core modules at 100% branch coverage
 
 **Planned — not yet implemented:**
 
-- ⬜ Document discovery and TXT / Markdown / PDF loaders (Stages 9–16)
+- ⬜ PDF loading (Stage 12) and the rest of the ingestion path —
+  metadata, service, deduplication, reporting, samples (Stages 13–17)
 - ⬜ Chunking and embedding generation (Stages 18–23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
