@@ -233,6 +233,55 @@ class IngestPipeline(Protocol):
         # load → chunk → embed → upsert → registry.update_status(INDEXED | FAILED)
 ```
 
+### 5.2.1 Discovery (`ingestion/discovery.py`) — implemented in Stage 10
+
+Classifies files under a root; **never opens file contents** (loaders do that).
+
+```python
+discover(root, *, base_dir=None, recursive=True) -> DiscoveryResult
+
+@dataclass(frozen=True, slots=True)
+class DiscoveredFile:     path; relative_path; filename; media_type; size_bytes
+                          # .suffix property, lower-cased
+class UnsupportedFile:    relative_path; filename; suffix; reason
+class DiscoveryResult:    root; files: tuple[...]; unsupported: tuple[...]
+                          # .is_empty .supported_count .unsupported_count
+                          # .total_size_bytes .relative_paths()
+
+describe(result) -> dict  # JSON-safe counts, root NAME only (never abs paths)
+```
+
+**Containment (the security property).** Every returned path is checked with
+`resolve().relative_to(root)`:
+
+* `followlinks=False` in `os.walk` → directory symlinks are never descended,
+  so `data/escape -> C:\Users` cannot be walked and indexed.
+* Symlinked *files* are checked individually (a file link can escape even
+  when directory links are not followed) → reported as unsupported with
+  reason `symlink resolves outside the discovery directory`.
+* `base_dir=` makes the configured `DATA_DIR` a hard boundary; passing a root
+  outside it raises `ValidationError` / `discovery_root_outside_base`.
+* `..` in a root is resolved *before* the containment test, so
+  `data/../secrets` is caught.
+
+**Classification.** Reuses `EXTENSION_TO_MEDIA_TYPE` from
+`domain/models.py` (single source of truth, added in Stage 09). Matching is
+case-insensitive (`.MD` works). Unsupported files get an actionable `reason`
+naming the extension *and* listing the supported ones.
+
+**Deliberately skipped, not reported as unsupported:** hidden entries
+(`.gitkeep`, `.DS_Store`) and `IGNORED_DIRECTORY_NAMES`
+(`.git`, `__pycache__`, `.venv`, `node_modules`, `.mypy_cache`,
+`.ruff_cache`). A directory containing only `.gitkeep` is therefore
+correctly `is_empty == True`.
+
+**Errors:** missing root → `NotFoundError` (`discovery_root_not_found`,
+message uses the basename so absolute paths never escape); root is a file →
+`ValidationError` (`discovery_root_not_a_directory`).
+
+**Determinism:** filenames are walked in sorted order, so repeated discovery
+yields identical ordering — required for stable ids in Stage 23.
+
 ### 5.3 Storage
 
 Responsibility: persistence + retrieval of vectors; lifecycle state of documents. Two independent stores behind interfaces so they can be swapped (Chroma → pgvector; SQLite → Postgres).
