@@ -10,10 +10,12 @@ Responsibilities, deliberately narrow:
   here would silently damage Markdown.
 * Fail with a clear, typed error when a file genuinely cannot be read.
 
-What this module explicitly does **not** do: OCR. A scanned PDF or an image
-has no extractable text, and inventing placeholder text for it would poison
-the index with fabricated content. Those cases raise a typed error so the
-ingestion service can mark the file *skipped* with an honest reason.
+What this module explicitly does **not** do: OCR. A scanned document has no
+extractable text, and inventing placeholder text for it would poison the
+index with fabricated content. The text loaders report an unreadable file
+with a typed error; the PDF loader (Stage 12) reports a missing text layer
+as an empty-but-valid result. Either way the ingest service can mark the
+file *skipped* with an honest reason rather than indexing nonsense.
 """
 
 from __future__ import annotations
@@ -24,8 +26,10 @@ from pathlib import Path
 from typing import Final
 
 from app.domain.errors import DocumentLoadError, NotFoundError, ValidationError
+from app.ingestion.pdf_loader import PDF_MEDIA_TYPE, PdfDocument, load_pdf
 
-#: Media types this module can load. PDF is handled separately (Stage 12).
+#: Media types the *text* loaders in this module handle. PDF has its own
+#: loader (:mod:`app.ingestion.pdf_loader`), re-exported below.
 TEXT_MEDIA_TYPES: Final[frozenset[str]] = frozenset({"text/plain", "text/markdown"})
 
 #: Media type used when a caller does not supply one; derived from the suffix.
@@ -292,16 +296,24 @@ def load(path: str | Path, *, media_type: str | None = None) -> TextDocument:
 
 
 def can_load(media_type: str) -> bool:
-    """Whether this module has a loader for the given media type."""
+    """Whether the *text* loaders in this module handle the given media type.
+
+    PDF is deliberately excluded: it is loaded by
+    :func:`app.ingestion.pdf_loader.load_pdf`, which is re-exported here for
+    convenience but is a different code path with page-level output.
+    """
     return media_type in TEXT_MEDIA_TYPES
 
 
 __all__ = [
+    "PDF_MEDIA_TYPE",
     "TEXT_MEDIA_TYPES",
+    "PdfDocument",
     "TextDocument",
     "can_load",
     "detect_newline_style",
     "load",
+    "load_pdf",
     "load_text",
     "media_type_for_path",
 ]
