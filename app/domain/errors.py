@@ -100,6 +100,19 @@ class DependencyError(RAGError):
     default_http_status = 502
 
 
+class DocumentLoadError(RAGError):
+    """A file exists but its content cannot be read or decoded (422).
+
+    Distinct from :class:`NotFoundError` (the file is there) and from
+    :class:`ValidationError` (the caller's input was bad — here the *file*
+    is bad). 422 rather than 400 because the request itself was well-formed;
+    the payload simply cannot be processed.
+    """
+
+    default_code = "document_load_failed"
+    default_http_status = 422
+
+
 class ProviderAuthenticationError(DependencyError):
     """The upstream provider rejected our credentials (502, with a clear cause)."""
 
