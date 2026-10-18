@@ -101,3 +101,22 @@ def build_encrypted_pdf(pages: list[str], password: str) -> bytes:
     out = io.BytesIO()
     writer.write(out)
     return out.getvalue()
+
+
+def build_pdf_with_metadata(pages: list[str], metadata: dict[str, str]) -> bytes:
+    """A valid PDF carrying a document-info dictionary.
+
+    Values are passed straight through to pypdf's writer, which is the point:
+    the tests need to see what a *real* producer's metadata survives, not what
+    a hand-written dictionary claims it looks like. That includes control
+    characters, over-long values and malformed dates.
+    """
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.append(io.BytesIO(build_pdf(pages)))
+    if metadata:
+        writer.add_metadata(metadata)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()

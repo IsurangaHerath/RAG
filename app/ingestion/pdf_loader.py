@@ -47,6 +47,7 @@ from pypdf.errors import (
 )
 
 from app.domain.errors import DocumentLoadError, NotFoundError, ValidationError
+from app.ingestion.metadata import PdfInfo, extract_pdf_info
 
 #: The only media type this module handles.
 PDF_MEDIA_TYPE: Final[str] = "application/pdf"
@@ -101,6 +102,10 @@ class PdfDocument:
     failed_pages: tuple[int, ...]
     #: Basename only — never an absolute path.
     source_name: str
+    #: Sanitised document-info dictionary, or ``None`` when the file
+    #: declared no metadata at all. Captured while the reader was open, so
+    #: callers do not have to re-read the file for it.
+    info: PdfInfo | None = None
 
     @property
     def page_count(self) -> int:
@@ -386,6 +391,11 @@ def load_pdf(
         reader = _open_reader(file_path, source_name)
         encrypted = bool(reader.is_encrypted)
         _decrypt(reader, source_name, password)
+        # Captured here, while the reader is open and already decrypted, so
+        # callers never have to reopen the file just for its metadata. An
+        # encrypted PDF's info dictionary is not readable before decryption,
+        # which is why this runs after _decrypt rather than before it.
+        info = extract_pdf_info(reader)
         pages, failed_pages = _extract_pages(reader, source_name)
 
     return PdfDocument(
@@ -395,6 +405,7 @@ def load_pdf(
         encrypted=encrypted,
         failed_pages=failed_pages,
         source_name=source_name,
+        info=info,
     )
 
 

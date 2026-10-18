@@ -77,8 +77,8 @@ RAG/
 │   ├── ingestion/           # Stages 10–16
 │   │   ├── discovery.py     # find supported files, block path traversal
 │   │   ├── loaders.py       # Stage 11: TXT/MD -> TextDocument; re-exports load_pdf
-pdf_loader.py    # Stage 12: PDF -> per-page text via pypdf
-│   │   ├── metadata.py      # normalise filename/type/source path
+│   │   ├── pdf_loader.py    # Stage 12: PDF -> per-page text via pypdf
+│   │   ├── metadata.py      # Stage 13: sanitised PDF info + derived metadata
 │   │   ├── deduplication.py # stable IDs + content hashes
 │   │   ├── service.py       # orchestrates discovery → load → metadata
 │   │   └── reporting.py     # structured per-batch ingest report
@@ -410,9 +410,108 @@ raising, so the return value is checked explicitly.
 raising; each becomes a typed error carrying the real reason, so the `pypdf`
 logger is raised to ERROR for the duration of a read and restored afterwards.
 
-**Not implemented:** OCR (as above), form-field extraction, and PDF document
-metadata beyond what Stage 13 adds. `password` exists and is tested, but
-nothing supplies it yet — there is no password-management feature.
+**Not implemented:** OCR (as above), form-field extraction, and digital
+signatures. Embedded metadata itself is handled by §5.2.4. `password` exists
+and is tested, but nothing supplies it yet — there is no password-management
+feature.
+
+### 5.2.4 Metadata (`ingestion/metadata.py`) — implemented in Stage 13
+
+Turns the facts a file already carries — declared in the PDF info
+dictionary, or visible in the first lines of the text — into one flat,
+sanitised, storage-ready record.
+
+```python
+extract_pdf_info(reader) -> PdfInfo        # takes an OPEN reader, not a path
+extract_text_info(text) -> TextInfo
+extract_title_from_text(text) -> str | None
+fallback_title(source_name) -> str | None
+build_metadata(*, source_name, media_type, byte_size, text="",
+               pdf_info=None, page_count=None) -> DocumentMetadata
+
+sanitize_text(value, *, max_length=...) -> str | None
+sanitize_keywords(value, *, limit=...) -> tuple[str, ...]
+parse_pdf_datetime(value) -> datetime | None
+
+@dataclass(frozen=True, slots=True)
+class PdfInfo:      title; author; subject; keywords; creator; producer
+                    created_at; modified_at          # .is_empty
+class TextInfo:     heading_count; word_count; line_count; char_count
+class DocumentMetadata:
+    source_name; media_type; byte_size       # provenance, always present
+    title; title_source; author; subject; keywords
+    creator; producer; created_at; modified_at; page_count
+    word_count; heading_count; char_count
+    # .is_empty .to_mapping() .summary()
+
+class TitleSource(StrEnum):  EMBEDDED | HEADING | FILENAME | NONE
+```
+
+**Embedded metadata is attacker-controlled, so it is sanitised.** A PDF's
+`/Title` and `/Author` are arbitrary strings chosen by whoever produced the
+file, and they flow onward into logs, API responses and the vector index.
+pypdf passes control characters, NUL bytes, newlines and tabs through
+untouched — a title of `"Bad\x00Title\x07"` round-trips verbatim — so every
+value has control characters stripped, whitespace collapsed and length
+capped (`MAX_TITLE_LENGTH` 200 for titles, `MAX_FIELD_LENGTH` 1000
+otherwise, `MAX_KEYWORDS` 32). This is the same reason §5.2.2 refuses NUL
+bytes in file *content*: untrusted bytes must not reach a place where they
+can forge a log line or escape a terminal. Nothing is ASCII-folded —
+Sinhala, CJK and emoji titles are legitimate and round-trip correctly, so
+folding them to `?` would destroy real information while appearing to tidy
+up.
+
+**Absent values are omitted, never `None`.** `DocumentMetadata.to_mapping()`
+drops missing fields rather than emitting them, because ChromaDB rejects
+`None` and non-scalar metadata values. One mapping is therefore valid for
+Chroma, for the domain `Document`, and for JSON. Datetimes are ISO-8601
+strings and keywords are one comma-joined string for the same reason —
+neither store accepts datetime or list values. `summary()` is the
+deliberate opposite: it is built field-by-field and reports every field
+with `None` for absent ones, so a log line shows what was *missing* as well
+as what was found. Neither ever contains document text.
+
+**Dates are parsed to timezone-aware UTC, or dropped.** `parse_pdf_datetime`
+implements the documented `D:YYYYMMDDHHmmSSOHH'mm'` format directly rather
+than calling pypdf, whose only exposed parser for it is private
+(`pypdf._utils.parse_iso8824_date`) — building on a private API means a
+patch release could break ingestion with no warning of ours. Every
+component after the year is optional, so a bare `D:2026` is valid. A naive
+input is interpreted as UTC (the domain model rejects naive datetimes,
+because the same ambiguous timestamp means different moments on different
+machines), and a malformed date such as `not-a-date` yields `None` rather
+than raising: pypdf's own parser raises `ValueError` here, and one corrupt
+field must not lose an otherwise readable document.
+
+**Title provenance is recorded, not guessed at.** `build_metadata` resolves
+the title embedded-first, then the first Markdown heading, then the
+filename, and stores which one won in `title_source`. An embedded title was
+declared by the author; a heading is a reasonable guess; a filename slug is
+usually machine-generated and means nothing. Collapsing them would hide
+which is which. Both text-derived steps inspect **only the first 20 lines**
+(`_TITLE_SCAN_LINES`) — a bound found to be necessary by a test: a regex
+search over the whole document happily adopted a heading 500 lines down as
+the document's title, which the docstring promised would not happen. For
+the same reason `is_empty` reports `False` only when the *document*
+declared something: a filename-derived title is something we invented for
+display, and counting it would make a metadata-free PDF claim otherwise.
+
+**Layering.** This module imports nothing from the loaders. It consumes
+primitive inputs (an open reader, a string, a byte size) and produces
+values; `pdf_loader` imports *from* it to capture `PdfInfo` while its reader
+is already open and decrypted, so the file is never read twice. That capture
+runs after `_decrypt`, because an encrypted PDF's info dictionary is not
+readable before decryption. Composing a loaded document into a full record
+is the ingest service's (Stage 14) job, which keeps the import graph acyclic.
+
+**Errors:** none. Every failure here degrades to a missing value, which is
+why no row appears in the error table. The three `except` guards around
+pypdf access are tested with stubs rather than left as unexecuted
+defensive code.
+
+**Not implemented:** XMP (XML) metadata, `/Trapped` and custom info keys
+(unknown keys are unbounded attacker input with no meaning to us), and
+language detection.
 
 ### 5.3 Storage
 
@@ -610,7 +709,7 @@ containerised runs can configure purely through environment variables.
 | | `langchain-chroma` | 1.1.0 | Chroma as a LangChain vector store |
 | LLM | `openai` | 3.31.0 | provider SDK |
 | Vector DB | `chromadb` | 1.5.9 | persistent HNSW index |
-| Parsing | `pypdf` | 6.21.1 | PDF text extraction, page by page (Stage 12) |
+| Parsing | `pypdf` | 6.21.1 | PDF text extraction, page by page (Stage 12); info dictionary (Stage 13) |
 | Web | `fastapi` | 0.143.3 | REST API |
 | | `uvicorn[standard]` | 0.54.0 | ASGI server |
 | | `pydantic` | 2.14.1 | request/response validation |
@@ -746,6 +845,7 @@ Coverage gate ≥ 80% on `app/domain`, `app/retrieval/context.py`, `app/generati
 - Secrets: env/secret manager only; never logged. Redact `Authorization`, prompt bodies, and document text from logs.
 - Data residency: document content is sent to OpenAI for embeddings and generation — disclose in the data-flow docs; if unacceptable, the `Embedder`/`AnswerGenerator` Protocols allow a local-model implementation with no code changes elsewhere. Optional zero-retention endpoints for enterprise accounts.
 - Prompt injection: document text is untrusted input — delimit it, instruct the model to ignore instructions inside context, and never let tool/registry actions be driven by model output in v1.
+- Embedded metadata: PDF info-dictionary fields are attacker-controlled strings that reach logs, the API and the vector index, so every value is control-character-stripped, length-capped and scalar-only before storage (§5.2.4).
 - Isolation: non-root container, read-only FS except data volumes, no shell in production image, dependency scanning (pip-audit/trivy) in CI.
 
 ## 11. Risks & Cost Levers

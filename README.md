@@ -72,7 +72,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1–12):**
+**Implemented and tested (Stages 1–13):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -88,13 +88,16 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   normalisation, formatting preserved byte-for-byte
 - ✅ PDF loading with page numbers kept for citations, per-page failure
   isolation, and specific errors for encrypted or corrupt files
+- ✅ Document metadata extraction: sanitised PDF info (title, author, dates,
+  keywords), titles derived from headings or filenames, and flat mappings
+  safe for ChromaDB
 - ✅ Typed `DocumentLoadError` for unreadable, undecodable and mislabelled files
-- ✅ **353 tests passing**, core modules at 100% branch coverage
+- ✅ **425 tests passing**, core modules at 100% branch coverage
 
 **Planned — not yet implemented:**
 
-- ⬜ The rest of the ingestion path — metadata, service, deduplication,
-  reporting, samples (Stages 13–17)
+- ⬜ The rest of the ingestion path — ingest service, deduplication,
+  reporting, samples (Stages 14–17)
 - ⬜ Chunking and embedding generation (Stages 18–23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
