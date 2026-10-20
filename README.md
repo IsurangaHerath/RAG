@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1–12 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1–14 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) now work and
 > are tested; the rest of the ingestion, retrieval and answer-generation
 > pipeline is **designed but not yet implemented**, and no benchmark results
@@ -72,7 +72,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1–13):**
+**Implemented and tested (Stages 1–14):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -91,13 +91,16 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 - ✅ Document metadata extraction: sanitised PDF info (title, author, dates,
   keywords), titles derived from headings or filenames, and flat mappings
   safe for ChromaDB
+- ✅ Ingest service that runs discovery → load → metadata across a whole
+  directory: empty files and scans reported as *skipped*, unreadable ones as
+  *failed* with the typed error's code, one bad file never stopping the batch
 - ✅ Typed `DocumentLoadError` for unreadable, undecodable and mislabelled files
-- ✅ **425 tests passing**, core modules at 100% branch coverage
+- ✅ **493 tests passing**, core modules at 100% branch coverage
 
 **Planned — not yet implemented:**
 
-- ⬜ The rest of the ingestion path — ingest service, deduplication,
-  reporting, samples (Stages 14–17)
+- ⬜ The rest of the ingestion path — deduplication, reporting,
+  samples (Stages 15–17)
 - ⬜ Chunking and embedding generation (Stages 18–23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)

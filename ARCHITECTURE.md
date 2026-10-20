@@ -79,9 +79,9 @@ RAG/
 │   │   ├── loaders.py       # Stage 11: TXT/MD -> TextDocument; re-exports load_pdf
 │   │   ├── pdf_loader.py    # Stage 12: PDF -> per-page text via pypdf
 │   │   ├── metadata.py      # Stage 13: sanitised PDF info + derived metadata
-│   │   ├── deduplication.py # stable IDs + content hashes
-│   │   ├── service.py       # orchestrates discovery → load → metadata
-│   │   └── reporting.py     # structured per-batch ingest report
+│   │   ├── service.py       # Stage 14: orchestrates discovery → load → metadata
+│   │   ├── deduplication.py # Stage 15: stable IDs + content hashes
+│   │   └── reporting.py     # Stage 16: structured per-batch ingest report
 │   ├── preprocessing/
 │   │   └── chunking.py      # Stage 18: LangChain recursive text splitting
 │   ├── embeddings/          # Stages 20–22
@@ -290,7 +290,7 @@ a PDF fails with an actionable message rather than decoding bytes as text.
 
 ```python
 load_text(path, *, media_type=None, normalize_newlines=True) -> TextDocument
-load(path, *, media_type=None) -> TextDocument          # Stage 14-shaped alias
+load(path, *, media_type=None) -> TextDocument          # alias the ingest service uses
 can_load(media_type) -> bool
 media_type_for_path(path) -> str                        # .md -> text/markdown, else text/plain
 detect_newline_style(raw: bytes) -> str                 # crlf | cr | lf | mixed | none
@@ -337,7 +337,7 @@ NUL bytes are rejected rather than decoded because a `.docx` or image given a
 `.txt` name would otherwise "succeed" and be indexed as garbage.
 
 **Empty is valid, not an error.** A zero-byte or whitespace-only file returns a
-`TextDocument` with `is_empty == True`; Stage 14 reports such files as *skipped*
+`TextDocument` with `is_empty == True`; §5.2.5 reports such files as *skipped*
 rather than failing the batch.
 
 **Out of scope:** OCR. A scanned *image* has no extractable text, and
@@ -382,7 +382,7 @@ with Python's zero-based indexing is documented and tested.
 
 **A missing text layer is reported, not raised.** A scanned PDF is a valid
 file with no text. It returns `has_text_layer == False` / `is_empty == True`
-(the PDF analogue of the empty-text-file case in §5.2.2) so Stage 14 can mark
+(the PDF analogue of the empty-text-file case in §5.2.2) so §5.2.5 marks it
 it *skipped*. Genuine failures — corrupt bytes, or encrypted with no usable
 password — still raise, because those are things a caller may need to act on.
 
@@ -502,7 +502,7 @@ values; `pdf_loader` imports *from* it to capture `PdfInfo` while its reader
 is already open and decrypted, so the file is never read twice. That capture
 runs after `_decrypt`, because an encrypted PDF's info dictionary is not
 readable before decryption. Composing a loaded document into a full record
-is the ingest service's (Stage 14) job, which keeps the import graph acyclic.
+is the ingest service's (§5.2.5) job, which keeps the import graph acyclic.
 
 **Errors:** none. Every failure here degrades to a missing value, which is
 why no row appears in the error table. The three `except` guards around
@@ -512,6 +512,103 @@ defensive code.
 **Not implemented:** XMP (XML) metadata, `/Trapped` and custom info keys
 (unknown keys are unbounded attacker input with no meaning to us), and
 language detection.
+
+### 5.2.5 Ingest service (`ingestion/service.py`) — implemented in Stage 14
+
+The composition point the previous three sections were building toward:
+given a directory, decide which files to read, read them, describe them,
+and report honestly on every one.
+
+```python
+ingest(root, *, base_dir=None, recursive=True) -> IngestResult
+ingest_file(path, *, media_type=None, relative_path=None,
+            size_bytes=None) -> FileResult
+describe(result) -> dict           # alias of IngestResult.summary()
+
+class FileOutcome(StrEnum):  LOADED | SKIPPED | FAILED
+
+@dataclass(frozen=True, slots=True)
+class FileResult:
+    source_name; relative_path; media_type; byte_size: int | None
+    outcome: FileOutcome; code; reason
+    document: TextDocument | PdfDocument | None
+    metadata: DocumentMetadata | None; page_count: int | None
+    # .is_loaded .is_skipped .is_failed .is_processed .text .summary()
+
+class IngestResult:
+    root; files: tuple[FileResult, ...]; unsupported: tuple[UnsupportedFile, ...]
+    # .loaded_count .skipped_count .failed_count .unsupported_count
+    # .processed_count .total_count .indexable_count
+    # .is_empty .has_failures .relative_paths() .failed() .skipped() .summary()
+
+LOADABLE_MEDIA_TYPES = {"text/plain", "text/markdown", "application/pdf"}
+EMPTY_FILE_CODE = "empty_file";  NO_TEXT_LAYER_CODE = "no_text_layer"
+```
+
+**Outcomes are not lifecycle statuses.** Results are tagged
+`FileOutcome`, deliberately a *different* vocabulary from `IngestStatus`
+(§5.1). That enum describes a registered document travelling through a
+pipeline, and it is owned by the registry; this service runs before any
+registry exists, and its three outcomes do not map onto those five:
+
+* A *skipped* file never becomes a document — there is no record to
+  advance, so assigning it a lifecycle status would invent one.
+* A *failed* file failed to be **read**, which is a different event from a
+  document failing to be **indexed**. Conflating them would make a corrupt
+  upload look like a vector-store outage.
+
+So the later registry code maps these outcomes onto statuses deliberately,
+rather than discovering that a skipped file cannot legally reach any
+terminal state in the existing state machine.
+
+**Only deliberate errors are caught.** The loaders already translate the
+messy real world — missing files, permission errors, corrupt PDFs, rejected
+passwords — into `RAGError` with a stable `code`, so catching that one type
+turns a bad file into a ``failed`` result and carries on with the rest of
+the batch. Anything *else* escaping is a programming bug, and bugs must not
+be converted into a tidy status line: that is how a defect survives
+unnoticed until production. One broken file never stops the batch; a broken
+*code path* still fails loudly.
+
+**Empty is skipped, not failed.** A text file with no content, or a scanned
+PDF with no text layer, is a valid file — the loaders already report
+`is_empty` rather than raising, precisely so this service can mark it
+``skipped`` with an honest reason. The two cases get **different codes**
+(`empty_file` vs `no_text_layer`) because they call for different actions
+from the user: "you uploaded a blank file" versus "this PDF would need
+OCR". Unsupported files are not even attempts: discovery classified them
+before anything was opened, so they stay in `unsupported` and are never
+counted among the failures.
+
+**Media-type resolution.** `.pdf` is checked *before* falling back to
+`media_type_for_path`, and that ordering matters: that function raises for
+a PDF because it belongs to the text-loader module, which cannot read them.
+This service reads both, so it resolves the suffix itself instead of
+inheriting a guard meant for someone else's caller. Without that, a direct
+`ingest_file("doc.pdf")` would raise out of the function rather than return
+a result.
+
+**Errors** (only two, and both are the *caller's* argument rather than the
+file's condition):
+
+| Condition | Behaviour | Code |
+| --- | --- | --- |
+| Root missing / not a directory / outside `base_dir` | raises (from discovery) | `discovery_root_not_found` / `discovery_root_not_a_directory` / `discovery_root_outside_base` |
+| Caller-supplied `media_type` is not loadable | raises `ValidationError` | `unsupported_media_type` |
+
+Every *file* problem — missing, unreadable, non-UTF-8, NUL bytes,
+corrupt, encrypted, unsupported extension — returns a ``failed``
+`FileResult` carrying the loader's own code instead of raising, so a
+directory can be processed without a try/except per file. The asymmetry is
+intentional: a media type the caller *stated* is validated eagerly (a bug
+in the caller), while a media type the *file* turns out to have is reported
+as a per-file outcome (a property of the data).
+
+**Deliberately not here:** no `doc_id`, no content hash, no `Document`
+record and no registry writes — those are deduplication's job (Stage 15).
+Holding them back keeps this module a pure *function of a file* (path in,
+outcome out), which is what makes it testable with no store, no network and
+no API key. No new dependencies: it composes modules that already exist.
 
 ### 5.3 Storage
 
