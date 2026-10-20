@@ -175,9 +175,9 @@ class Document:
 hashes the *bytes*. If `doc_id` were content-derived, editing a file would
 produce a brand-new document and its stale chunks would linger in the index
 forever. With path-derived ids, an edit keeps the same `doc_id` (so Stage 23
-can replace old chunks) while `content_sha256` changes (so Stage 15 detects
+can replace old chunks) while `content_sha256` changes (so §5.2.6 detects
 the edit). A rename changes `doc_id` but not the hash — that is exactly how
-Stage 15 distinguishes *renamed* from *modified*.
+§5.2.6 distinguishes *renamed* from *modified*.
 
 **Status lifecycle** (terminal states accept no further transitions):
 
@@ -605,10 +605,109 @@ in the caller), while a media type the *file* turns out to have is reported
 as a per-file outcome (a property of the data).
 
 **Deliberately not here:** no `doc_id`, no content hash, no `Document`
-record and no registry writes — those are deduplication's job (Stage 15).
+record and no registry writes — those are deduplication's job (§5.2.6).
 Holding them back keeps this module a pure *function of a file* (path in,
 outcome out), which is what makes it testable with no store, no network and
 no API key. No new dependencies: it composes modules that already exist.
+
+### 5.2.6 Deduplication (`ingestion/deduplication.py`) — implemented in Stage 15
+
+The service (§5.2.5) answers *"can this file be read?"*. This module answers
+the harder follow-up: *"have I seen it before, and if so, in what sense?"*
+
+```python
+classify(known, *, source_path, content) -> DedupDecision
+
+find_by_doc_id(known, doc_id) -> Document | None
+find_by_hash(known, digest) -> Document | None
+
+class ChangeKind(StrEnum):  NEW | UNCHANGED | MODIFIED | RENAMED
+
+@dataclass(frozen=True, slots=True)
+class DedupDecision:
+    kind: ChangeKind
+    doc_id: str                    # id the incoming path hashes to
+    content_sha256: str            # hash of the incoming content
+    existing_doc_id: str | None    # known record this decision concerns
+    reason: str                    # one loggable line, ids only
+    # .is_new .is_unchanged .is_modified .is_renamed
+    # .needs_ingest .is_duplicate_content .summary()
+```
+
+**Why two identifiers, revisited.** §5.1 split `doc_id` (hash of the source
+path) from `content_sha256` (hash of the content) precisely so that this
+comparison is possible. Neither alone can tell the cases apart: path alone
+cannot see an edit, and content alone cannot tell whether a document is new
+*and* changed, or simply new. The pair gives four outcomes, each implying a
+different action:
+
+| Kind | Path known | Content known | Action |
+| --- | --- | --- | --- |
+| `new` | no | no | ingest it |
+| `unchanged` | yes | yes | nothing to do |
+| `modified` | yes | no | re-ingest, replacing its chunks |
+| `renamed` | no | yes | report the document already holding it |
+
+The two middle rows are the reason this module exists. A **modified**
+document keeps its `doc_id`, so re-ingesting *replaces* its stored chunks;
+mistake it for a new document and the previous version lingers in the index,
+still being retrieved. A **renamed** one produces a *different* `doc_id` for
+content already stored; mistake it for a new document and the same text is
+indexed twice, so every retrieval returns it twice.
+
+**Detection, not policy.** `renamed` reports a *fact* — this content already
+exists under a different path — and deliberately stops there. Content alone
+cannot distinguish a rename from a move from a plain copy: `spec.md` →
+`api-spec.md` and `spec.md` → `backup/spec.md` produce identical hashes, yet
+one should probably redirect to the existing document while the other should
+be indexed independently. That call belongs to the upload API and the ingest
+pipeline, which know about users and intent; this module reports what the
+bytes say. So `existing_doc_id` differs from `doc_id` *only* for `renamed` —
+that difference is what makes the case detectable, and for the other two
+non-new kinds it points at the record being acted on.
+
+**The path check outranks the content check.** When a document already
+exists at this path, that is the decision that matters, and the content
+lookup is skipped. Otherwise a file edited to equal a neighbour's content
+would be reclassified as a rename, and its own stale chunks would never be
+replaced. The cost is that such an edit is reported as `modified` without
+mentioning the neighbour — which is fine, because re-ingesting under the
+path's own `doc_id` is correct either way.
+
+**Pure functions, registry-shaped lookups.** Nothing here opens a file,
+talks to a store, or holds state: callers pass the documents they know about
+and get a decision back, which is what makes this testable with no database,
+no network and no API key. `find_by_doc_id` / `find_by_hash` are named to
+mirror the registry Protocol (§5.4), so when a real registry lands it can
+replace these linear scans with indexed queries without changing this
+contract. A scan is linear — honest for what a single-process ingest sees,
+and said here rather than left to be discovered.
+
+**One rule callers must not get wrong:** hash the *same* input that built
+the stored documents. `Document.create` hashes the extracted text it is
+given unless a `content_hash` is passed, and a digest only ever matches what
+it was computed over — comparing a file's bytes against a text-derived hash
+would silently report every file as modified. The `content_hash` escape
+hatch exists for exactly this (a file-level digest from discovery), and the
+tests cover documents built both ways.
+
+**Errors** (one, and again the *caller's* argument rather than the file's):
+
+| Condition | Behaviour | Code |
+| --- | --- | --- |
+| `source_path` empty / absolute / contains `..` | raises `ValidationError` | `empty_source_path` / `absolute_source_path` / `path_traversal` |
+
+A malformed path is a caller bug and propagates, matching the service's
+treatment of a stated-but-wrong `media_type`: reporting it as "this file is
+new" would quietly mint an id from a path that should never have reached
+here. The four kinds are outcomes, not errors — there is no fifth.
+
+**Deliberately not here:** no batch planner and no decision *store*. A
+sequence of files is deduplicated by classifying each against the set as it
+stands after the earlier ones were processed, which is how a sequential
+ingest catches a folder containing two identical files without this module
+growing any state of its own. Recording what was decided, and acting on
+those decisions, is the ingest pipeline's job.
 
 ### 5.3 Storage
 
@@ -634,6 +733,12 @@ class FileStore(Protocol):
     def save(self, stream: BinaryIO, *, doc_id: str) -> Path: ...
     def path_for(self, doc_id: str) -> Path: ...
 ```
+
+`DocumentRegistry.find_by_hash` is the indexed counterpart of
+`app.ingestion.deduplication.find_by_hash` (§5.2.6), which today scans a
+plain sequence for the same reason everything else here is unimplemented:
+the storage for it does not exist yet. Same name, same contract, so the swap
+is a change of where the lookup runs, not of what it means.
 
 Chroma specifics: single persistent collection `techdocs` (HNSW, cosine), `persist_directory` on a Docker volume in single-node mode or Chroma server mode if the api/worker split needs a network share. Metadata schema: `doc_id, chunk_id, filename, page, section, media_type, ingested_at`.
 
