@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1–15 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1–16 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) now work and
 > are tested; the rest of the ingestion, retrieval and answer-generation
 > pipeline is **designed but not yet implemented**, and no benchmark results
@@ -72,12 +72,12 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1–15):**
+**Implemented and tested (Stages 1–16):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
 - ✅ Package scaffold for every planned component
-- ✅ Windows virtualenv with 16 pinned direct dependencies
+- ✅ Windows virtualenv with 17 pinned direct dependencies
 - ✅ Centralized, validated configuration (`.env.example` → `.env`)
 - ✅ Secret handling: `SecretStr` + tests proving the key never reaches a log
 - ✅ One shared error hierarchy mapped to HTTP status codes
@@ -98,11 +98,17 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   is already known classifies it as new, unchanged, modified or renamed, so
   edits replace their chunks and identical content is never indexed twice
 - ✅ Typed `DocumentLoadError` for unreadable, undecodable and mislabelled files
-- ✅ **547 tests passing**, core modules at 100% branch coverage
+- ✅ Per-batch ingest report grouping problems by their error code with the
+  files that produced them, plus bytes read and optional dedup tallies —
+  renderable as plain text or JSON, and never carrying document text
+- ✅ Structured logging that cannot leak document text: a key deny-list, a
+  value-size guard, and type-name collapsing for objects whose `repr` quotes
+  their own content, off only when `LOG_DOCUMENT_CONTENT` is deliberately set
+- ✅ **649 tests passing**, core modules at 100% branch coverage
 
 **Planned — not yet implemented:**
 
-- ⬜ The rest of the ingestion path — reporting, samples (Stages 16–17)
+- ⬜ Sample data preparation and CLI entry points (Stage 17)
 - ⬜ Chunking and embedding generation (Stages 18–23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)

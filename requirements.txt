@@ -38,6 +38,11 @@ pydantic==2.14.1
 # Reads .env / environment variables into the typed Settings object.
 pydantic-settings==2.16.0
 
+# ---- Observability (Stage 16) ---------------------------------------------
+# Structured logging. app/observability/logging.py adds a processor that
+# withholds document text unless LOG_DOCUMENT_CONTENT is deliberately enabled.
+structlog==26.1.0
+
 # ---- Data science / evaluation -------------------------------------------
 numpy==2.5.4
 pandas==3.0.6
