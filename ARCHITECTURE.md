@@ -709,6 +709,72 @@ ingest catches a folder containing two identical files without this module
 growing any state of its own. Recording what was decided, and acting on
 those decisions, is the ingest pipeline's job.
 
+### 5.2.7 Ingest reporting (`ingestion/reporting.py`) — implemented in Stage 16
+
+§5.2.5 answers *"what happened to this batch?"* in a form sized for **logs
+and API responses**: counts, the root's name, one entry per problem file —
+because a log line that lists 200 failures is noise with a cost attached. A
+report is the same question asked somewhere else: once, at the end of a run,
+by a person deciding what to fix.
+
+```python
+build_report(result, *, decisions=None, duration_seconds=None) -> IngestReport
+format_bytes(size) -> str
+
+@dataclass(frozen=True, slots=True)
+class CodeTally:
+    code: str;  count: int;  paths: tuple[str, ...]
+    # .to_dict()
+
+@dataclass(frozen=True, slots=True)
+class IngestReport:
+    root;  total_files;  processed_files;  indexable
+    loaded;  skipped;  failed;  unsupported
+    total_bytes: int | None
+    failures: tuple[CodeTally, ...];  skips: tuple[CodeTally, ...]
+    dedup: tuple[tuple[str, int], ...] | None;  duration_seconds: float | None
+    # .is_empty .has_failures .total_problems
+    # .to_dict() .to_json() .render()
+```
+
+**Derived, never a parallel record.** Every figure comes from an
+`IngestResult` that already exists; nothing is re-read and no file is
+opened. The report can therefore be thrown away and rebuilt after any
+change, which removes the question of which of two counts is current — the
+quiet failure mode of any system that keeps a summary and its source apart.
+
+**Grouping is the whole difference.** After a 200-file ingest the useful
+question is not *which files failed* but *how many failed the same way*: a
+hundred `encrypted_pdf` entries are one problem with a hundred instances. So
+failures and skips are bucketed by their stable `code`, ordered by frequency
+with ties broken on the code itself — two runs over the same data produce
+byte-identical reports. Each tally keeps its paths in discovery order,
+uncapped, because a truncated list of failures is a list you cannot act on.
+
+**Absent measurements stay absent.** `total_bytes` is `None` when no file
+reported a size rather than `0`, and `duration_seconds` is `None` unless the
+caller supplies it. "Never measured" and "there was nothing" are different
+facts, and a report must not invent the second to fill the first.
+
+**Deduplication tallies are optional.** Pass §5.2.6's decisions and the
+report says how many files were new, unchanged, modified or renamed — the
+answer to *did this run actually change anything?* Withhold them and the
+field is `None`, which renders as no section at all rather than as a row of
+zeros. They are supplied rather than computed because hashing content needs
+bytes this module never opens; and the counts need no positional alignment
+to files, so a caller may pass a subset.
+
+**Errors:** one, and the caller's: a negative `duration_seconds` raises
+`ValueError`. Only a broken clock produces one, and printing it would
+launder the error into the report.
+
+**Deliberately not here:** no document text and no absolute paths — the rule
+both `summary()` methods already follow, so `render()` and `to_json()` are
+safe to write to a file and commit alongside sample data. Byte formatting
+uses KiB/MiB/GiB rather than KB/MB/GB: 1 KiB is 1024 bytes by definition,
+whereas "MB" is read both ways in the wild and precision beats familiarity
+here.
+
 ### 5.3 Storage
 
 Responsibility: persistence + retrieval of vectors; lifecycle state of documents. Two independent stores behind interfaces so they can be swapped (Chroma → pgvector; SQLite → Postgres).
@@ -816,6 +882,80 @@ v1: FastAPI `BackgroundTasks` or `arq`+Redis (chosen so tests can run an inline 
 
 `pydantic-settings` reads env: `OPENAI_API_KEY`, `EMBEDDING_MODEL` (default `text-embedding-3-large`), `CHAT_MODEL` (default `gpt-4o-mini`), `CHROMA_PATH`/`CHROMA_HOST`, `CHUNK_SIZE`, `TOP_K`, `RERANK_TOP_N`, `CONTEXT_BUDGET_TOKENS`, `MAX_UPLOAD_MB`, `AUTH_MODE`, `WORKER_MODE` (`inline|queue`).
 
+### 5.9 Logging (`observability/logging.py`) — implemented in Stage 16
+
+Structured logs, and the property that matters more: **document text does
+not reach them.** Extraction produces exactly the material that must not be
+copied into a log — a PDF's full text, a chunk, an assembled answer — and it
+is a single `logger.info("loaded", text=doc.content)` away from being
+retained in a system whose memory far outlives the index it was debugging.
+
+```python
+configure_logging(*, level="INFO", allow_document_content=False,
+                  renderer="json" | "console", max_value_chars=512) -> None
+configure_from_settings(settings) -> None
+make_content_redactor(*, allow_document_content=False, max_value_chars=...) -> Processor
+get_logger(name=None) -> BoundLogger
+
+CONTENT_KEYS               # key names treated as document text
+REDACTED = "<redacted>"
+DEFAULT_MAX_VALUE_CHARS = 512
+```
+
+**Three layers, because no single one is enough.**
+
+1. **Key deny-list.** A value logged as `content`, `text` or `page_content`
+   becomes `<redacted>` whatever its length — a one-line secret is still a
+   secret. Matching is exact rather than a substring search, because
+   `text_file_count=3` must survive: a log that lies about how many files it
+   saw is worse than one showing too little. A flagged key blanks its value
+   *wholesale*, structure nested inside included — the key said the value is
+   content, so the value goes.
+2. **Size guard.** Any string longer than `max_value_chars` becomes
+   `<omitted N chars>` *whatever it is called under*. This is the backstop
+   for key names the deny-list has never heard of. The default sits below
+   the default chunk size (1000) so a whole chunk cannot fit, and the
+   length is kept rather than a truncation preview — a preview is content
+   too.
+3. **Type collapsing.** `Document` is a frozen dataclass whose `repr`
+   quotes its own `content`, so handing one to a logger would smuggle the
+   text past the first two layers: the value is neither a flagged key nor a
+   long string, just an object whose `repr` happens to contain it.
+   Unrecognised objects become `<Document>`; `str`, numbers, `None`,
+   `pathlib.Path`, `enum.Enum` and dates survive as themselves (a `Path` as
+   a plain string, an `Enum` as its value, so `json.dumps` never has to
+   fall back to `repr`).
+
+**Redaction is on unless deliberately turned off.**
+`allow_document_content=True` disables all three layers, and
+`Settings.LOG_DOCUMENT_CONTENT` defaults `False`, so a fresh install gets
+the safe behaviour without asking for it. The inversion is deliberate: the
+risky state is the opt-in one.
+
+**Why a processor rather than discipline.** Review catches the *known* leak
+— the one a comment can anticipate. The processor catches the one nobody
+anticipated, because it never reasons about intent; it only sees that a
+value is large, oddly named, or an object. §5.2.5 and §5.2.7 obey the same
+rule from the other direction (never *build* a payload containing text), and
+the two halves meet: nothing constructs content-bearing output, and nothing
+would print it if something did.
+
+**Reconfiguration replaces rather than stacks.** Calling it twice does not
+produce two pipelines, and `cache_logger_on_first_use=False` keeps that
+true for loggers already created — which is what makes it possible to
+reconfigure inside a test and have the test actually see the new processors.
+The root logger gets a handler only when it has none, so an embedded or
+under-test process keeps the handlers it already had.
+
+**Errors:** an unknown `level` or a negative `max_value_chars` raises
+`ValueError`. `Settings` validates `LOG_LEVEL` at startup, but this is also
+callable directly, so the same six names are enforced rather than trusted.
+
+**Not implemented:** no file destination or rotation, no request-id context
+wiring, and no metrics (`observability/metrics.py`, Stage 51). This module
+configures the library and guarantees the redaction; shipping where the API
+puts its logs belongs with the API layer (§5.6).
+
 ## 6. Data Flow
 
 ### 6.1 Upload → index
@@ -916,6 +1056,7 @@ containerised runs can configure purely through environment variables.
 | | `uvicorn[standard]` | 0.54.0 | ASGI server |
 | | `pydantic` | 2.14.1 | request/response validation |
 | Config | `pydantic-settings` | 2.16.0 | typed `.env` settings (Stage 06) |
+| Ops | `structlog` | 26.1.0 | structured logging with content withheld (Stage 16) |
 | Data science | `numpy` | 2.5.4 | vector maths |
 | | `pandas` | 3.0.6 | experiment tables |
 | | `scikit-learn` | 1.9.1 | evaluation metrics |
@@ -966,7 +1107,7 @@ interpreter that lacks the dependencies.
 |---|---|---|---|
 | Web | `python-multipart` | 55 | multipart document upload |
 | Docs | `pypdf`, `python-docx`, `beautifulsoup4` | 11–12 | PDF/DOCX/HTML parsing |
-| Ops | `structlog`, `tenacity` | 16 / 21 | logging, bounded retries |
+| Ops | `tenacity` | 21 | bounded retries |
 | Test | `pytest-cov`, `pytest-asyncio` | 07 | coverage, async tests |
 | Quality (opt.) | `ragas`, `tiktoken`, `sentence-transformers` | 45–52 / 31 | eval, token budgeting, rerank |
 

@@ -33,6 +33,7 @@ REQUIRED_PACKAGES: dict[str, str] = {
     "uvicorn": "uvicorn",
     "pydantic": "pydantic",
     "pydantic-settings": "pydantic_settings",
+    "structlog": "structlog",
     "numpy": "numpy",
     "pandas": "pandas",
     "scikit-learn": "sklearn",
