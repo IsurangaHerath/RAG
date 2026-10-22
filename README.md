@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1–16 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1–17 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) now work and
 > are tested; the rest of the ingestion, retrieval and answer-generation
 > pipeline is **designed but not yet implemented**, and no benchmark results
@@ -72,7 +72,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1–16):**
+**Implemented and tested (Stages 1–17):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -104,11 +104,17 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 - ✅ Structured logging that cannot leak document text: a key deny-list, a
   value-size guard, and type-name collapsing for objects whose `repr` quotes
   their own content, off only when `LOG_DOCUMENT_CONTENT` is deliberately set
-- ✅ **649 tests passing**, core modules at 100% branch coverage
+- ✅ A sample corpus generated on demand, byte-identical on every run, split
+  into readable documents and files that deliberately fail — so one command
+  demonstrates loaded, skipped, failed and unsupported results together
+- ✅ Command-line entry points (`python -m scripts.cli prepare|ingest`) that
+  print the report as text or JSON and tell invocation failures (status 1)
+  apart from files that failed to load (status 3)
+- ✅ **688 tests passing**, with the CLI and sample generator measured at
+  100% and 99% branch coverage alongside the pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ Sample data preparation and CLI entry points (Stage 17)
 - ⬜ Chunking and embedding generation (Stages 18–23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
@@ -183,6 +189,46 @@ message naming the field instead of failing mid-request.
 
 Full list in [`.env.example`](.env.example).
 
+### Run the pipeline from the command line
+
+The repository ships no documents — `data/` is git-ignored, and checked-in
+binary fixtures are unreviewable. Generate them instead: the generator is a
+fixed set of literals, so every run writes byte-identical files and re-ingest
+never mistakes a regeneration for an edit.
+
+```powershell
+python -m scripts.cli prepare    # write the sample corpus into data/samples
+python -m scripts.cli ingest     # read it back and print the ingest report
+```
+
+`data/samples/` holds two areas, and the split is deliberate:
+
+| Directory | Contents |
+|---|---|
+| `corpus/` | four readable documents plus a 3-page PDF with extractable text — the material a later retrieval stage will be evaluated against |
+| `edge-cases/` | a blank file, a scanned PDF with no text layer, a password-protected PDF, a non-UTF-8 export and an unsupported image |
+
+One run therefore produces every outcome the ingest service reports: **5
+loaded, 2 skipped, 2 failed, 1 unsupported**.
+
+Exit statuses are what a caller acts on:
+
+| Status | Meaning |
+|---|---|
+| `0` | ran, and no file failed |
+| `1` | the command could not run — a missing directory, a bad setting |
+| `2` | the arguments themselves were wrong (argparse's convention) |
+| `3` | the report printed, but some files failed to load |
+
+Status 1 and 3 are kept apart on purpose: one says your invocation is wrong,
+the other says your data is wrong, and the report still prints on `3` so
+there is something to act on.
+
+Both commands accept `--format json`, which puts only JSON on stdout and
+keeps logs and hints on stderr, so the output can be piped. `ingest` also
+takes `--no-recursive`; `prepare` takes `--force` to overwrite samples you
+have edited, and leaves them alone without it.
+
 ## Development workflow
 
 One command runs every check, stopping at the first failure:
@@ -198,9 +244,9 @@ Or run each tool yourself:
 ```powershell
 python -m ruff format .          # apply formatting
 python -m ruff check .           # lint
-python -m mypy app               # type check
+python -m mypy app scripts       # type check
 python -m pytest                 # tests
-python -m pytest --cov=app --cov-report=term-missing   # tests + coverage
+python -m pytest --cov=app --cov=scripts --cov-report=term-missing   # tests + coverage
 ```
 
 ### Conventions

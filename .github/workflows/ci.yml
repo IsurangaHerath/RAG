@@ -44,7 +44,8 @@ jobs:
         run: python -m ruff check .
 
       - name: Mypy type check
-        run: python -m mypy app
+        # scripts/ included on purpose: the CLI is code we run, not scratch tooling.
+        run: python -m mypy app scripts
 
       - name: Pytest
-        run: python -m pytest --cov=app --cov-report=term-missing -q
+        run: python -m pytest --cov=app --cov=scripts --cov-report=term-missing -q

@@ -91,7 +91,10 @@ filterwarnings = [
 # coverage
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
-source = ["app"]
+# scripts/ counts too. It is not importable application code, but it is code
+# this project ships and runs -- the CLI and the sample-data generator -- and
+# measuring only app/ would quietly exempt it from the same scrutiny.
+source = ["app", "scripts"]
 branch = true
 omit = ["*/__pycache__/*"]
 
