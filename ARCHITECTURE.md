@@ -118,7 +118,11 @@ RAG/
 ├── tests/
 │   ├── unit/                # offline tests, mocked OpenAI (no paid calls)
 │   └── integration/         # real Chroma on tmp_path, mocked HTTP
-├── scripts/                 # Stage 17: sample-data preparation, CLI entry points
+├── scripts/                 # helper tooling, kept as a package so tests can reuse it
+│   ├── cli.py               # Stage 17: prepare / ingest entry points
+│   ├── samples.py           # Stage 17: deterministic sample corpus
+│   ├── pdf_fixtures.py      # Stage 17: PDF builders shared with the tests
+│   └── check.ps1            # Stage 07: one-command quality gate
 ├── docs/                    # sample reports, evaluation notes
 ├── data/                    # git-ignored local data (uploads, Chroma persist dir)
 ├── docker/                  # Stage 58: container helpers
@@ -956,6 +960,76 @@ wiring, and no metrics (`observability/metrics.py`, Stage 51). This module
 configures the library and guarantees the redaction; shipping where the API
 puts its logs belongs with the API layer (§5.6).
 
+### 5.10 Tooling: sample data and the command line (`scripts/`) — implemented in Stage 17
+
+Three modules, plus one deliberate move between them.
+
+**Sample data is generated, not committed.** `data/` is git-ignored, and
+committing binary documents would be unreviewable, would bloat the history,
+and would leave a newcomer with a corpus only one machine has. So
+`samples.py` writes the corpus on demand from literals kept here, where
+every byte can be read in review.
+
+**Determinism is a requirement, not a nicety.** Document identity rests on
+hashing the path and hashing the content (§5.1), so a generator that
+produced a slightly different file each run would report the whole corpus
+as *modified* on every re-ingest and hand it all back to the indexer. Hence
+no timestamps, no random ids, and builders that are byte-stable across
+runs — including the encrypted PDF, whose scheme could plausibly have been
+salted. A test writes the corpus into two directories and compares the two
+results byte for byte.
+
+**Two directories, because two callers want different things.** `corpus/`
+holds four readable documents and a three-page PDF with extractable text:
+what a later retrieval stage can be scored against. `edge-cases/` holds a
+blank file, a scan with no text layer, a password-protected PDF, a
+non-UTF-8 export and an unsupported image: what proves that loaded,
+skipped, failed and unsupported still behave. Separating them means an
+evaluation stage never has to filter failures out of its own dataset, and a
+demonstration never has to break real files by hand.
+
+**`prepare` writes; it does not manage a directory.** Anything it does not
+know about is never removed, and a file that differs is left exactly as the
+user wrote it unless `--force` is given — a renamed sample in the generator
+must not become a destroyed file on someone's disk.
+
+**The exit statuses mirror the pipeline's own distinction.** `ingest`
+exits `0` when nothing failed, `3` when the report printed but some files
+failed to load, and `1` when it could not run at all; argparse owns `2`.
+That is §5.2.5's *your data is wrong* against *your invocation is wrong*,
+made machine-readable, and the report still prints on `3` because a status
+with nothing behind it is one a caller cannot act on. Deliberate errors
+reach the user as message, code and detail on stderr rather than as a
+traceback — but only `RAGError` is caught. Anything else keeps its
+traceback, because a bug must look like a bug.
+
+**stdout is the report; stderr is everything else.** `--format json` puts
+nothing but JSON on stdout so the output can be piped, while hints, errors
+and logging stay on stderr. Logging is configured before any work, so
+redaction applies to the CLI exactly as it does to the API (§5.9), but the
+happy path emits nothing above `DEBUG`: a tool that annotates its own
+successful run is noise.
+
+**Where the PDF builders live.** `scripts/pdf_fixtures.py` holds them, and
+`tests/unit/pdf_fixtures.py` re-exports them unchanged — so the three test
+files importing the fixture needed no edits. Two consumers need the same
+hand-written PDF syntax and neither may import the other: tooling that
+imported tests would break the moment a build excluded the suite, while
+tests importing the tooling would invert the direction dependencies are
+meant to flow. One copy, in a package, with the arrow pointing from tests
+toward tooling.
+
+**The gate covers this package too.** `mypy app scripts` and
+`--cov=app --cov=scripts` are set in `scripts/check.ps1` and
+`.github/workflows/ci.yml`. New code exempt from two of the four checks
+would be exactly the drift the structural and dependency guards exist to
+prevent.
+
+**Not implemented:** no `index` command (that arrives with the vector
+store), no deduplication tallies in the printed report — `build_report`
+already accepts `decisions`, but there is no registry to compare against
+yet — and no file watching; `prepare` is run by hand.
+
 ## 6. Data Flow
 
 ### 6.1 Upload → index
@@ -1125,9 +1199,9 @@ Configuration lives in `pyproject.toml` (one file for all tools).
 |---|---|---|---|
 | Ruff (format) | 0.17.1 | `python -m ruff format .` | deterministic whitespace/import layout |
 | Ruff (lint) | 0.17.1 | `python -m ruff check .` | E/W pycodestyle, F Pyflakes, I isort, UP pyupgrade, B bugbear, C4, RUF |
-| mypy | 2.4.0 | `python -m mypy app` | `strict = true` on `app/`; looser for `tests/` |
+| mypy | 2.4.0 | `python -m mypy app scripts` | `strict = true` on `app/` and `scripts/`; looser for `tests/` |
 | pytest | 9.1.1 | `python -m pytest` | `--strict-markers --strict-config`, `filterwarnings = error` |
-| coverage | 7.16.2 | `python -m pytest --cov=app` | branch coverage, `show_missing` |
+| coverage | 7.16.2 | `python -m pytest --cov=app --cov=scripts` | branch coverage, `show_missing`; no floor — the numbers report, they do not gate |
 
 **One command for everything (Windows):**
 

@@ -64,11 +64,13 @@ Invoke-Step "ruff format --check" @("-m", "ruff", "format", "--check", ".")
 Invoke-Step "ruff check (lint)" @("-m", "ruff", "check", ".")
 
 if (-not $SkipTypes) {
-    Invoke-Step "mypy (types)" @("-m", "mypy", "app")
+    # scripts/ is included deliberately: it is the CLI and the sample-data
+    # generator, real code a person runs, not scratch tooling.
+    Invoke-Step "mypy (types)" @("-m", "mypy", "app", "scripts")
 }
 
 if (-not $SkipTests) {
-    Invoke-Step "pytest (tests + coverage)" @("-m", "pytest", "--cov=app", "--cov-report=term-missing", "-q")
+    Invoke-Step "pytest (tests + coverage)" @("-m", "pytest", "--cov=app", "--cov=scripts", "--cov-report=term-missing", "-q")
 }
 
 Write-Host ""
