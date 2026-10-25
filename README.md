@@ -1,10 +1,10 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1–17 of a 60-stage plan are
-> complete. File discovery and loading (TXT, Markdown and PDF) now work and
-> are tested; the rest of the ingestion, retrieval and answer-generation
-> pipeline is **designed but not yet implemented**, and no benchmark results
-> exist yet.
+> **Status: early-stage foundation.** Stages 1–18 of a 60-stage plan are
+> complete. File discovery and loading (TXT, Markdown and PDF) and splitting
+> that text into page- and section-attributed chunks now work and are tested;
+> embedding, retrieval and answer-generation are **designed but not yet
+> implemented**, and no benchmark results exist yet.
 > See [Project status](#project-status) for exactly what does and does not work.
 
 A Retrieval-Augmented Generation (RAG) system for technical documents: upload
@@ -72,7 +72,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1–17):**
+**Implemented and tested (Stages 1–18):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -110,12 +110,16 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 - ✅ Command-line entry points (`python -m scripts.cli prepare|ingest`) that
   print the report as text or JSON and tell invocation failures (status 1)
   apart from files that failed to load (status 3)
-- ✅ **688 tests passing**, with the CLI and sample generator measured at
-  100% and 99% branch coverage alongside the pipeline modules
+- ✅ Chunking: loaded documents split into overlapping chunks by LangChain's
+  recursive character splitter, each stamped with a stable `doc_id:index` id
+  and carrying the `page` (PDF) or `section` (Markdown heading) it came from,
+  so a retrieved passage can later be cited to its source
+- ✅ **728 tests passing**, with the chunking module and CLI measured at
+  100% branch-inclusive coverage alongside the rest of the pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ Chunking and embedding generation (Stages 18–23)
+- ⬜ Embedding generation (Stages 19–23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
 - ⬜ Grounded answer generation with citations (Stages 37–44)

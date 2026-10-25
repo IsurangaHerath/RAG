@@ -209,22 +209,48 @@ Helpers: `make_doc_id(path)`, `make_chunk_id(doc_id, index)`,
 `content_sha256(bytes|str)`, `SUPPORTED_MEDIA_TYPES`,
 `EXTENSION_TO_MEDIA_TYPE`.
 
+**`Chunk`** — implemented in Stage 18, the retrievable half of a document:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Chunk:
+    chunk_id: str     # f"{doc_id}:{index}", derived by .create()
+    doc_id: str       # the document it came from
+    index: int        # 0-based, counted across pages and sections
+    content: str      # the text to embed; .summary() never includes it
+    metadata: Mapping[str, str | int | float | bool]   # JSON scalars only
+
+    # factory (derives chunk_id; the same rule Document.create follows)
+    Chunk.create(doc_id=..., index=..., content=..., metadata=...)
+    # derived: .char_count .summary()
+```
+
+`Chunk.create()` derives `chunk_id` rather than accepting one, so an id and
+a position can never disagree — a disagreement would quietly break
+idempotent re-ingestion. Validation rejects a mismatched `chunk_id`, a
+malformed `doc_id`, a negative index, empty content and non-scalar
+metadata, reusing the same helpers `Document` validates with. `summary()`
+omits `content` for exactly the reason `Document.summary()` does. How a
+document is split into chunks is §5.11.
+
 **Not yet created** (arrive with their own stages, still planned):
-`Chunk` → Stage 18, `RetrievedChunk` → Stage 30, `Citation` + `Answer` →
-Stage 43, `TokenUsage` → Stage 51. `make_chunk_id()` already exists so
-Stage 18 can use the agreed id format immediately.
+`RetrievedChunk` → Stage 30, `Citation` + `Answer` → Stage 43,
+`TokenUsage` → Stage 51.
 
 ### 5.2 Ingestion
 
 Responsibility: turn a stored file into indexed, citable chunks. Idempotent per `doc_id` (content-hash IDs; re-upload overwrites rather than duplicates).
 
 ```python
+# Design sketches, written before any stage ran. The sections marked
+# "implemented" are authoritative where they differ; §5.11 is the chunker's.
 class DocumentLoader(Protocol):
-    def load(self, path: Path, *, doc_id: str, media_type: str) -> list[LCDocument]: ...
-        # LCDocument = langchain_core.documents.Document (page_content + metadata incl. page_no)
+    def load(self, path: Path, *, doc_id: str, media_type: str) -> TextDocument | PdfDocument: ...
+        # originally drawn as list[LCDocument]; Stages 11-12 built native
+        # records instead (§5.2.2 / §5.2.3) and the types stayed framework-free
 
 class Chunker(Protocol):
-    def split(self, documents: list[LCDocument], *, doc_id: str) -> list[Chunk]: ...
+    def split(self, document: TextDocument | PdfDocument, *, doc_id: str) -> list[Chunk]: ...
         # RecursiveCharacterSplitter(1000, 150); markdown/table-aware for structured text;
         # emits chunk_id = f"{doc_id}:{index}", preserves page/section metadata
 
@@ -1029,6 +1055,97 @@ prevent.
 store), no deduplication tallies in the printed report — `build_report`
 already accepts `decisions`, but there is no registry to compare against
 yet — and no file watching; `prepare` is run by hand.
+
+### 5.11 Chunking (`preprocessing/chunking.py`) — implemented in Stage 18
+
+Responsibility: turn what a loader returned into the `Chunk` records of §5.1
+that get embedded, stored and cited. One class does it —
+`RecursiveChunker(chunk_size=1000, chunk_overlap=150)` — wrapping LangChain's
+`RecursiveCharacterTextSplitter`, pinned in `requirements.txt` since Stage 05.
+
+**Splitting happens inside a *unit*, never across two.** A unit is the
+largest span that must not be mixed with any other, and which one applies
+depends on the source:
+
+| Source | Unit | Provenance attached to every chunk |
+| --- | --- | --- |
+| PDF | one page (`PdfDocument.pages`) | `page` (1-based) |
+| Markdown | one ATX heading section | `section` (full heading path) |
+| Plain text | the whole file | — |
+
+`section` is a **breadcrumb**, not a bare leaf title: `"Endpoints > GET
+/payments/{id}"`. Leaf names repeat inside a single document, and the path
+is the thing a reader can follow back through the document to check a
+citation. Text before the first heading has no `section` at all.
+
+Every chunk also carries `filename` and `media_type`, because §5.3's storage
+schema lists them and attaching them here means the indexing stage copies
+what it is given instead of reconstructing it from elsewhere. Keys a source
+cannot honestly answer are **left out**, never `""` or `-1`: `section=""`
+would read as "a section called nothing".
+
+Two guarantees follow from units:
+
+* **`page` is exact.** A chunk never straddles two pages, because it would
+  have to name one — and naming the wrong page is worse for a citation than
+  losing the overlap between those two pages is.
+* **`section` is exact**, including for `# comment` lines inside fenced code
+  blocks, which are not headings; splitting there would chop a script into
+  pieces labelled after its own comments. Markdown sections use
+  `from_language(Language.MARKDOWN)` separators (headings, fences, rules,
+  blank lines); prose and extracted PDF text use the default
+  blank-line-first recursion.
+
+**A heading with no body folds into its first descendant.** A heading
+whose next line is another heading — `## Endpoints` immediately followed
+by `### GET /payments/{id}` — would otherwise be a section whose entire
+text is the heading: a twelve-character chunk that can be retrieved and
+answers nothing, while every endpoint below it is embedded with no idea
+which heading it belongs to. The heading line is prepended to the child's
+text instead, where the child's breadcrumb already contains the parent's
+title, so text and label stay in agreement. A heading with no descendant
+to fold into keeps its own section rather than losing its words.
+
+**The one rule that may break `chunk_size`.** When a section is larger than
+the limit, the splitter's first choice is the blank line under the heading,
+which would strand `## Rate limits` as its own fourteen-character chunk —
+retrievable, answering nothing — while the paragraph it introduces is
+embedded with no idea which heading it belongs to.
+`_fold_leading_heading` glues that lone heading to the first paragraph of
+its section instead, re-slicing from the original text (never concatenating
+the two pieces: the splitter drops the separator between them, so joining
+them would invent text that appears nowhere in the document). The folded
+chunk may exceed `chunk_size` by exactly its heading's length. That is a
+deliberate trade — `chunk_size` is a quality target, not a ceiling anything
+downstream depends on, since embeddings accept far more than 1000
+characters and §5.4 counts tokens when assembling a prompt. A chunk with no
+heading to glue never overshoots.
+
+**Settings are validated in the constructor**: `chunk_size >= 1` and
+`0 <= chunk_overlap < chunk_size`, as `ValidationError`s with codes
+`invalid_chunk_size` / `invalid_chunk_overlap` rather than the bare
+`ValueError` LangChain raises. A bad configuration then fails on the line
+that set it, not partway through a document. The defaults mirror
+`Settings`, and a test pins the two copies together so they cannot drift.
+
+**Determinism is a requirement, not a nicety.** No clock, no randomness and
+no per-document state on the instance: the same document always yields the
+same chunks, in the same order, with the same ids — so re-ingesting an
+unchanged file overwrites the same `chunk_id` values instead of appending a
+second copy of every chunk. An input with no text (empty file, a scan) is
+`[]`, not an error.
+
+**Deviation from §5.2's original Protocol sketch:** `split()` takes
+`TextDocument | PdfDocument`, not `list[LCDocument]`, for the same reason
+the loaders do (§5.2.2 / §5.2.3). The pipeline's call site becomes
+`chunker.split(loader.load(...), doc_id=...)` with no conversion step, and
+LangChain's document type stays an implementation detail inside this module
+rather than appearing in a signature the rest of the project must depend on.
+
+**Not implemented:** no token-based sizing (characters stand in for tokens),
+no overlap across page or section boundaries (stated above as the cost of
+exact attribution), and no table parsing — a table stays whole when it fits
+and otherwise breaks between rows, which is all the separator list promises.
 
 ## 6. Data Flow
 

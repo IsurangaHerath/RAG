@@ -29,7 +29,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -177,6 +177,46 @@ def _sha256_hex(content: bytes | str) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _require(value: object, name: str) -> None:
+    """Reject a field that is missing, not a string, or blank."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError(f"{name} must be a non-empty string", code=f"empty_{name}")
+
+
+def _validate_metadata(metadata: Mapping[str, str | int | float | bool]) -> None:
+    """Metadata must be a mapping of non-empty keys to JSON scalars.
+
+    Rejecting nested structures and ``None`` keeps the record safe to
+    store in ChromaDB, send as JSON, and log — all of which choke on
+    arbitrary object graphs.
+
+    Shared by :class:`Document` and :class:`Chunk`, which must not be able
+    to drift apart on what "valid metadata" means: one rule, one place.
+    """
+    if not isinstance(metadata, Mapping):
+        raise ValidationError(
+            f"metadata must be a mapping, got {type(metadata).__name__}",
+            code="invalid_metadata",
+        )
+
+    for key, value in metadata.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValidationError(
+                "metadata keys must be non-empty strings",
+                code="invalid_metadata_key",
+            )
+        # bool is checked before int on purpose: bool subclasses int, so
+        # both are allowed, but the ordering keeps the intent readable.
+        if not isinstance(value, (str, int, float, bool)):
+            raise ValidationError(
+                f"metadata[{key!r}] must be a string, number or bool — "
+                f"got {type(value).__name__}. Nested structures and None are "
+                f"not supported because they cannot be stored in the vector "
+                f"index.",
+                code="invalid_metadata_value",
+            )
+
+
 # --- The model ----------------------------------------------------------------
 
 
@@ -292,14 +332,14 @@ class Document:
         if isinstance(self.source_path, str) and "\\" in self.source_path:
             object.__setattr__(self, "source_path", self.source_path.replace("\\", "/"))
 
-        self._require(self.doc_id, "doc_id")
+        _require(self.doc_id, "doc_id")
         if not _DOC_ID_RE.match(self.doc_id):
             raise ValidationError(
                 f"doc_id must look like 'doc_' + 16 hex chars, got {self.doc_id!r}",
                 code="invalid_doc_id",
             )
 
-        self._require(self.filename, "filename")
+        _require(self.filename, "filename")
         if any(sep in self.filename for sep in ("/", "\\")):
             raise ValidationError(
                 "filename must be a basename without directory separators; "
@@ -317,7 +357,7 @@ class Document:
                 code="invalid_filename",
             )
 
-        self._require(self.media_type, "media_type")
+        _require(self.media_type, "media_type")
         if not _MIME_RE.match(self.media_type):
             raise ValidationError(
                 f"media_type must be a valid MIME type like 'text/markdown', "
@@ -331,7 +371,7 @@ class Document:
                 code="invalid_content",
             )
 
-        self._validate_metadata(self.metadata)
+        _validate_metadata(self.metadata)
 
         if not isinstance(self.created_at, datetime):
             raise ValidationError("created_at must be a datetime", code="invalid_created_at")
@@ -383,42 +423,6 @@ class Document:
                 "an indexed document must record when it was ingested",
                 code="missing_ingested_at",
             )
-
-    @staticmethod
-    def _require(value: object, name: str) -> None:
-        if not isinstance(value, str) or not value.strip():
-            raise ValidationError(f"{name} must be a non-empty string", code=f"empty_{name}")
-
-    @staticmethod
-    def _validate_metadata(metadata: Mapping[str, str | int | float | bool]) -> None:
-        """Metadata must be a mapping of non-empty keys to JSON scalars.
-
-        Rejecting nested structures and ``None`` keeps the record safe to
-        store in ChromaDB, send as JSON, and log — all of which choke on
-        arbitrary object graphs.
-        """
-        if not isinstance(metadata, Mapping):
-            raise ValidationError(
-                f"metadata must be a mapping, got {type(metadata).__name__}",
-                code="invalid_metadata",
-            )
-
-        for key, value in metadata.items():
-            if not isinstance(key, str) or not key.strip():
-                raise ValidationError(
-                    "metadata keys must be non-empty strings",
-                    code="invalid_metadata_key",
-                )
-            # bool is checked before int on purpose: bool subclasses int, so
-            # both are allowed, but the ordering keeps the intent readable.
-            if not isinstance(value, (str, int, float, bool)):
-                raise ValidationError(
-                    f"metadata[{key!r}] must be a string, number or bool — "
-                    f"got {type(value).__name__}. Nested structures and None are "
-                    f"not supported because they cannot be stored in the vector "
-                    f"index.",
-                    code="invalid_metadata_value",
-                )
 
     # -- derived helpers ----------------------------------------------------
 
@@ -522,9 +526,120 @@ class Document:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class Chunk:
+    """One retrievable slice of a document, with the provenance to cite it.
+
+    Where :class:`Document` describes a whole file, a chunk is the unit that
+    is embedded, stored and quoted back at a user — so it carries the id and
+    the position needed to say "document X, chunk 7", plus whatever the
+    source could say about where in that document the text came from.
+
+    Immutable, like every record here: the storage stage hands chunks to a
+    vector store while a renderer may still be reading one.
+
+    Parameters
+    ----------
+    chunk_id:
+        ``"<doc_id>:<index>"`` from :func:`make_chunk_id`. Stable for the
+        same document and the same splitting settings, which is what lets
+        re-ingestion overwrite a chunk rather than add a duplicate.
+    doc_id:
+        Document this chunk came from.
+    index:
+        0-based position within that document, counted across pages and
+        sections so the id never depends on how the text was grouped.
+    content:
+        The text to embed. Named like :attr:`Document.content` so the
+        logging redaction deny-list covers it without a second list to
+        keep in sync.
+    metadata:
+        JSON scalars only. Chunkers attach what storage needs verbatim:
+        ``filename`` and ``media_type`` always, plus ``page`` for paged
+        sources and ``section`` where headings could be derived.
+    """
+
+    chunk_id: str
+    doc_id: str
+    index: int
+    content: str
+    metadata: Mapping[str, str | int | float | bool] = field(default_factory=dict)
+
+    # -- construction -------------------------------------------------------
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        doc_id: str,
+        index: int,
+        content: str,
+        metadata: Mapping[str, str | int | float | bool] | None = None,
+    ) -> Chunk:
+        """Build a chunk, deriving ``chunk_id`` from the position.
+
+        The normal entry point, for the same reason ``Document.create`` is:
+        hand-assembling the record would let an id and a position disagree,
+        and a disagreeing id quietly breaks idempotent re-ingestion.
+        """
+        return cls(
+            chunk_id=make_chunk_id(doc_id, index),
+            doc_id=doc_id,
+            index=index,
+            content=content,
+            metadata=dict(metadata or {}),
+        )
+
+    # -- validation ---------------------------------------------------------
+
+    def __post_init__(self) -> None:
+        """Validate every field once, at construction time."""
+        _require(self.doc_id, "doc_id")
+        if not _DOC_ID_RE.match(self.doc_id):
+            raise ValidationError(
+                f"doc_id must look like 'doc_' + 16 hex chars, got {self.doc_id!r}",
+                code="invalid_doc_id",
+            )
+
+        # Deriving rather than pattern-matching the id means the two can
+        # never disagree, and it raises for a negative index on the way.
+        expected = make_chunk_id(self.doc_id, self.index)
+        if self.chunk_id != expected:
+            raise ValidationError(
+                f"chunk_id must be {expected!r} for this doc_id and index, got {self.chunk_id!r}",
+                code="invalid_chunk_id",
+            )
+
+        _require(self.content, "content")
+        _validate_metadata(self.metadata)
+
+    # -- derived helpers ----------------------------------------------------
+
+    @property
+    def char_count(self) -> int:
+        """Number of characters of chunk text."""
+        return len(self.content)
+
+    def summary(self) -> dict[str, Any]:
+        """Return a JSON-safe summary for API responses and logs.
+
+        Deliberately excludes ``content``, exactly as ``Document.summary``
+        does: a chunk is the text a user may be quoted, so it is the last
+        thing that should reach a log line by accident.
+        """
+        return {
+            "chunk_id": self.chunk_id,
+            "doc_id": self.doc_id,
+            "index": self.index,
+            "char_count": self.char_count,
+            "metadata": dict(self.metadata),
+        }
+
+
 __all__ = [
     "EXTENSION_TO_MEDIA_TYPE",
     "SUPPORTED_MEDIA_TYPES",
+    "Chunk",
     "Document",
     "IngestStatus",
     "content_sha256",
