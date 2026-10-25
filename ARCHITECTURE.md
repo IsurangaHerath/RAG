@@ -84,8 +84,8 @@ RAG/
 │   │   └── reporting.py     # Stage 16: structured per-batch ingest report
 │   ├── preprocessing/
 │   │   └── chunking.py      # Stage 18: LangChain recursive text splitting
-│   ├── embeddings/          # Stages 20–22
-│   │   ├── base.py          # provider-agnostic Embedder interface
+│   ├── embeddings/          # Stages 19–22
+│   │   ├── base.py          # Stage 19: provider-agnostic Embedder interface
 │   │   ├── openai_embedder.py  # OpenAI adapter + validation
 │   │   └── batching.py      # batched calls, bounded retries/backoff
 │   ├── storage/             # Stages 24–27
@@ -243,7 +243,8 @@ Responsibility: turn a stored file into indexed, citable chunks. Idempotent per 
 
 ```python
 # Design sketches, written before any stage ran. The sections marked
-# "implemented" are authoritative where they differ; §5.11 is the chunker's.
+# "implemented" are authoritative where they differ; §5.11 is the chunker's
+# and §5.12 the embedder's.
 class DocumentLoader(Protocol):
     def load(self, path: Path, *, doc_id: str, media_type: str) -> TextDocument | PdfDocument: ...
         # originally drawn as list[LCDocument]; Stages 11-12 built native
@@ -257,6 +258,7 @@ class Chunker(Protocol):
 class Embedder(Protocol):
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]: ...
         # batched (e.g. 128), retries with exponential backoff on 429/5xx
+        # (both arrive with the adapter); interface implemented in Stage 19
     def embed_query(self, text: str) -> list[float]: ...
 
 class IngestPipeline(Protocol):
@@ -1146,6 +1148,56 @@ rather than appearing in a signature the rest of the project must depend on.
 no overlap across page or section boundaries (stated above as the cost of
 exact attribution), and no table parsing — a table stays whole when it fits
 and otherwise breaks between rows, which is all the separator list promises.
+
+### 5.12 Embedder contract (`embeddings/base.py`) — implemented in Stage 19
+
+The first half of embedding generation is not a provider call; it is the
+agreement that makes providers interchangeable. `Embedder` is a structural
+`Protocol` with exactly the two methods §5.2 sketched: `embed_documents(texts)`
+returns one vector per input, in input order, and `embed_query(text)` returns
+one vector for one question. Application code asks for an `Embedder` and never
+for `OpenAIEmbeddings`, so changing providers later is an import change rather
+than a refactor — §1's promise, made checkable instead of aspirational. The
+interface sits with its component in `embeddings/base.py` (§4's layout), not
+in `domain/`, which stays data-only: models and errors, no behaviour contracts.
+
+**The property everything downstream rests on:** a text embeds the same way
+whichever method is called — `embed_query(t)` equals
+`embed_documents([t])[0]`. Retrieval compares query vectors against document
+vectors, so two different spaces would make every similarity score
+meaningless, and the failure would present as "retrieval is badly tuned"
+rather than as a mismatched embedder. The contract suite treats this as a
+rule, not a coincidence.
+
+**Shape rules, enforced rather than documented:** one vector per input text
+in order; a single dimensionality shared across calls and across both
+methods; every component a finite `float`, never an all-zero vector (a zero
+vector has no direction and would tie with everything); an empty batch is
+`[]`, not an error; and blank or non-text input raises `ValidationError` with
+code `empty_embedding_input` *before* any network call. The rules live in
+`tests/unit/test_embedder_contract.py`, which runs them against every
+implementation in its registry — `mypy` checks each registration against the
+Protocol at that same line — so a future provider joins with one added line
+and cannot quietly disagree with the others.
+
+**`FakeEmbedder` (`tests/fakes.py`) is a lexical double, honestly named.**
+It SHA-256s each word into one of `dimension` buckets, counts the buckets and
+L2-normalises, so shared words yield a positive cosine similarity and
+retrieval tests can ask "does the right chunk win?" with no network and no
+cost. It models no meaning — "car" and "automobile" are unrelated to it —
+which its docstring states outright; golden tests that need real semantics
+must use a real model. SHA-256 rather than Python's `hash` is deliberate:
+`hash` is salted per process, so a double whose output changes between runs
+would break the reproducibility every other test assumes. The double lives
+under `tests/` rather than `app/` precisely because it must never be
+mistaken for a provider in production code.
+
+**Not implemented (Stages 20–22):** no provider — the OpenAI adapter, its
+response validation, batching, and bounded retries with backoff all arrive
+with those stages, and `langchain_openai.OpenAIEmbeddings` stays unused until
+then. Dimension *policy* is the adapter's concern too: the contract requires
+one consistent dimension but pins no number, leaving `Settings.embedding_model`
+in charge of what the vectors actually are.
 
 ## 6. Data Flow
 

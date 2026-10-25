@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1–18 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1-19 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
 > embedding, retrieval and answer-generation are **designed but not yet
@@ -72,7 +72,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1–18):**
+**Implemented and tested (Stages 1-19):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -114,12 +114,19 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   recursive character splitter, each stamped with a stable `doc_id:index` id
   and carrying the `page` (PDF) or `section` (Markdown heading) it came from,
   so a retrieved passage can later be cited to its source
-- ✅ **728 tests passing**, with the chunking module and CLI measured at
+- ✅ An embedder contract before any provider: a structural `Embedder`
+  interface whose rules — one vector per chunk in order, one shared
+  dimension, queries and documents in the same vector space, finite
+  components, blank input rejected locally with a stable error code — are
+  enforced by a contract suite that any future implementation must pass,
+  alongside an offline test double that makes retrieval testable with no
+  network calls
+- ✅ **744 tests passing**, with the chunking module and CLI measured at
   100% branch-inclusive coverage alongside the rest of the pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ Embedding generation (Stages 19–23)
+- ⬜ Embedding generation (Stages 20–23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
 - ⬜ Grounded answer generation with citations (Stages 37–44)
