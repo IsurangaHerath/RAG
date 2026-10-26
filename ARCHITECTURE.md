@@ -86,7 +86,7 @@ RAG/
 │   │   └── chunking.py      # Stage 18: LangChain recursive text splitting
 │   ├── embeddings/          # Stages 19–22
 │   │   ├── base.py          # Stage 19: provider-agnostic Embedder interface
-│   │   ├── openai_embedder.py  # OpenAI adapter + validation
+│   │   ├── openai_embedder.py  # Stage 20: OpenAI adapter + validation
 │   │   └── batching.py      # batched calls, bounded retries/backoff
 │   ├── storage/             # Stages 24–27
 │   │   ├── chroma.py        # VectorIndex impl over persistent Chroma
@@ -257,8 +257,9 @@ class Chunker(Protocol):
 
 class Embedder(Protocol):
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]: ...
-        # batched (e.g. 128), retries with exponential backoff on 429/5xx
-        # (both arrive with the adapter); interface implemented in Stage 19
+        # batched (e.g. 128), retries with exponential backoff on 429/5xx —
+        # still pending (Stage 21); interface Stage 19 (§5.12),
+        # adapter Stage 20 (§5.13)
     def embed_query(self, text: str) -> list[float]: ...
 
 class IngestPipeline(Protocol):
@@ -1192,12 +1193,70 @@ would break the reproducibility every other test assumes. The double lives
 under `tests/` rather than `app/` precisely because it must never be
 mistaken for a provider in production code.
 
-**Not implemented (Stages 20–22):** no provider — the OpenAI adapter, its
-response validation, batching, and bounded retries with backoff all arrive
-with those stages, and `langchain_openai.OpenAIEmbeddings` stays unused until
-then. Dimension *policy* is the adapter's concern too: the contract requires
-one consistent dimension but pins no number, leaving `Settings.embedding_model`
+**Not implemented:** batching and bounded retries with backoff (Stage 21+)
+— until then the adapter embeds a batch in one delegation and fails fast
+on 429/5xx. Dimension *policy* stays out of the contract: it requires one
+consistent dimension but pins no number, leaving `Settings.embedding_model`
 in charge of what the vectors actually are.
+
+### 5.13 OpenAI adapter (`embeddings/openai_embedder.py`) — implemented in Stage 20
+
+The first implementation of §5.12's contract, wrapped around
+`langchain_openai.OpenAIEmbeddings` (§7.3 pinned that class for exactly this,
+and it already ships in the pinned dependencies). It does three jobs in call
+order: validate input with the shared rule from `base.py` — a blank text is
+answered locally with `empty_embedding_input` rather than paid for with a
+round trip; delegate the embedding; then validate the response and translate
+failures.
+
+**Response validation exists because of what a broken value would cost
+later.** The count must equal the input count, or `chunk_id` *i* silently
+pairs with vector *j* and citations point at the wrong text. Components must
+be finite `float`s — one `NaN` poisons every cosine it joins. Vectors in a
+batch share one dimension, and once an instance has learned its dimension
+from the first response, a different one is refused: a model changing
+mid-run fails loudly here rather than as a mysterious rejection from the
+vector-store stages much later. Violations raise `DependencyError` with
+codes `embedding_invalid_response`, `embedding_count_mismatch`,
+`embedding_invalid_vector` or `embedding_dimension_mismatch` — the provider
+misbehaved, which is a 502-class problem, not a caller mistake.
+
+**Provider exceptions join the hierarchy; provider messages do not.**
+`openai.AuthenticationError` becomes `ProviderAuthenticationError`,
+`RateLimitError` becomes `ProviderRateLimitError`, and everything else
+(connection failure, timeout, 5xx, refused 400s) becomes `DependencyError`.
+The translation copies only the exception class name and HTTP status into
+`detail`, because OpenAI's authentication errors quote (part of) the key
+they rejected, and no credential may travel through `message`/`detail` —
+the rule `errors.py` states outright. The original exception rides along as
+`__cause__`, so deliberate callers keep full context while logs and API
+responses stay clean. A test pins this by asserting the secret never
+appears anywhere in the raised error.
+
+**No retries here, on purpose.** The client is built with
+`max_retries=0`, so the openai transport cannot invent retry policy behind
+our back; bounded retries with exponential backoff arrive with
+`batching.py` (Stage 21), where one policy can be seen, tested and counted
+instead of two silently multiplying worst-case latency. `from_settings`
+assembles that client from `Settings` — model, timeout, and the key via
+`require_openai_key()`, which fails with an actionable message *before* any
+client exists rather than as a cryptic 401 from the API.
+
+**Offline by construction.** The delegate is typed by a local
+`_ClientLike` Protocol — langchain's shape, which takes `list[str]` where
+`Embedder` promises `Sequence[str]` — so tests inject a stub needing no
+inheritance, while `mypy` verifies the real class against the Protocol at
+the single construction site. `StubEmbeddings` (`tests/fakes.py`) is that
+stub: `FakeEmbedder`'s vectors plus knobs for corrupting output and raising
+provider errors, and the adapter appears in the contract registry with it,
+so the shared suite now runs against two implementations. No live call has
+been made — that still needs a real `OPENAI_API_KEY`.
+
+**Not implemented:** batching and the bounded retry policy (Stage 21+);
+`dimensions` is never set, so vectors come at whatever the model's full
+size is (`.env.example` warns that changing `EMBEDDING_MODEL` invalidates
+the index); no token accounting beyond what `OpenAIEmbeddings` does
+internally to split over-long inputs.
 
 ## 6. Data Flow
 

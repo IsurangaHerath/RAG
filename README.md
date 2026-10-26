@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1-19 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1-20 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
 > embedding, retrieval and answer-generation are **designed but not yet
@@ -72,7 +72,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1-19):**
+**Implemented and tested (Stages 1-20):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -121,12 +121,19 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   enforced by a contract suite that any future implementation must pass,
   alongside an offline test double that makes retrieval testable with no
   network calls
-- ✅ **744 tests passing**, with the chunking module and CLI measured at
-  100% branch-inclusive coverage alongside the rest of the pipeline modules
+- ✅ The OpenAI embedding adapter: it builds its client from settings (the
+  key is checked before any client exists), validates every response before
+  a caller sees it — count, dimension consistency, finite components — and
+  translates provider failures into the shared error hierarchy while never
+  copying the provider's message, so a credential cannot reach logs; all of
+  it proven through a stubbed delegate, with no network call required
+- ✅ **774 tests passing**, with the chunking and embedding modules and the
+  CLI measured at 100% branch-inclusive coverage alongside the rest of the
+  pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ Embedding generation (Stages 20–23)
+- ⬜ Embedding generation (Stages 21–23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
 - ⬜ Grounded answer generation with citations (Stages 37–44)

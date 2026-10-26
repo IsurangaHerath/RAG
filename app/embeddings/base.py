@@ -37,7 +37,10 @@ registered embedder:
 * an empty batch is an empty result, not an error;
 * blank input — or input that is not text at all — raises
   ``ValidationError`` with code ``empty_embedding_input`` before any
-  network call, so a caller learns about it for free either way.
+  network call, so a caller learns about it for free either way. The
+  check itself lives in :func:`require_embedding_text` below, so every
+  implementation enforces one rule written once rather than private
+  copies that could drift apart.
 
 A new provider joins that suite by adding one line to its registry, which
 is how "swappable" stays true instead of aspirational.
@@ -48,7 +51,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-__all__ = ["Embedder"]
+from app.domain.errors import ValidationError
+
+__all__ = ["Embedder", "require_embedding_text"]
 
 
 class Embedder(Protocol):
@@ -93,3 +98,25 @@ class Embedder(Protocol):
             ``empty_embedding_input``).
         """
         ...  # pragma: no cover - Protocol declaration, callers supply the body
+
+
+def require_embedding_text(text: str) -> str:
+    """Return ``text`` if it is usable, or raise the contract's rejection.
+
+    Shared by every implementation so "blank input fails the same way"
+    is one rule in one place. The contract suite would catch three
+    private copies drifting apart — but only after a release had already
+    shipped three slightly different error messages.
+
+    Raises
+    ------
+    ValidationError
+        ``text`` is blank or not a string; code
+        ``empty_embedding_input``.
+    """
+    if not isinstance(text, str) or not text.strip():
+        raise ValidationError(
+            "embedding input must be a non-empty string",
+            code="empty_embedding_input",
+        )
+    return text

@@ -14,11 +14,12 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from app.domain.errors import ValidationError
+from app.embeddings.base import require_embedding_text
 
-__all__ = ["FakeEmbedder"]
+__all__ = ["FakeEmbedder", "StubEmbeddings"]
 
 #: Words are the unit of "similarity" for this double. Deliberately naive.
 _TOKEN_RE = re.compile(r"\w+")
@@ -65,22 +66,12 @@ class FakeEmbedder:
 
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed each text in order; an empty batch is an empty result."""
-        validated = [self._require(text) for text in texts]
+        validated = [require_embedding_text(text) for text in texts]
         return [self._vector(text) for text in validated]
 
     def embed_query(self, text: str) -> list[float]:
         """Embed one query into the same space as document vectors."""
-        return self._vector(self._require(text))
-
-    @staticmethod
-    def _require(text: str) -> str:
-        """Reject blank or non-text input before any work happens."""
-        if not isinstance(text, str) or not text.strip():
-            raise ValidationError(
-                "embedding input must be a non-empty string",
-                code="empty_embedding_input",
-            )
-        return text
+        return self._vector(require_embedding_text(text))
 
     def _vector(self, text: str) -> list[float]:
         """Hash the words into buckets and normalise to unit length."""
@@ -100,3 +91,53 @@ class FakeEmbedder:
         """Map a word to a bucket index, stably across processes."""
         digest = hashlib.sha256(token.encode("utf-8")).digest()
         return int.from_bytes(digest[:8], "big") % self._dimension
+
+
+class StubEmbeddings:
+    """Stand-in for ``langchain_openai.OpenAIEmbeddings``, the adapter's delegate.
+
+    Shaped like langchain's class — ``embed_documents`` takes ``list[str]``,
+    not ``Sequence[str]`` — because that is the protocol
+    :class:`~app.embeddings.openai_embedder.OpenAIEmbedder` is typed
+    against. Vectors come from :class:`FakeEmbedder`, so contract tests
+    exercised through the adapter run on realistic values.
+
+    Knobs cover what a real provider does wrong:
+
+    * ``error`` — raised on every call, to exercise translation of
+      provider exceptions into the project's error hierarchy;
+    * ``mutate`` — corrupts otherwise valid output (wrong count, NaN,
+      ragged dimensions) to exercise response validation.
+
+    ``calls`` and ``queries`` record what reached the delegate, so tests
+    can assert validation happens *before* the provider would have been
+    paid a round trip.
+    """
+
+    def __init__(self, *, dimension: int = 64) -> None:
+        self._fake = FakeEmbedder(dimension=dimension)
+        self.error: BaseException | None = None
+        self.mutate: Callable[[list[list[float]]], list[list[float]]] | None = None
+        self.calls = 0
+        self.queries: list[str] = []
+
+    def embed_documents(
+        self, texts: list[str], chunk_size: int | None = None, **kwargs: object
+    ) -> list[list[float]]:
+        """Return (optionally corrupted) vectors, one per text, in order."""
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        vectors = self._fake.embed_documents(texts)
+        return self.mutate(vectors) if self.mutate else vectors
+
+    def embed_query(self, text: str) -> list[float]:
+        """Return (optionally corrupted) single-vector query embedding."""
+        self.calls += 1
+        self.queries.append(text)
+        if self.error is not None:
+            raise self.error
+        vector = self._fake.embed_query(text)
+        if self.mutate:
+            return self.mutate([vector])[0]
+        return vector

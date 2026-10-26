@@ -27,13 +27,17 @@ import pytest
 
 from app.domain.errors import ValidationError
 from app.embeddings.base import Embedder
-from tests.fakes import FakeEmbedder
+from app.embeddings.openai_embedder import OpenAIEmbedder
+from tests.fakes import FakeEmbedder, StubEmbeddings
 
-#: Every embedder the tests know how to exercise. A future OpenAI adapter
-#: joins by adding one entry — ``mypy`` verifies it here, the contract
-#: tests verify its behaviour everywhere else.
+#: Every embedder the tests know how to exercise. A future implementation
+#: joins by adding one entry — ``mypy`` verifies it against the Protocol
+#: here, the contract tests verify its behaviour everywhere else. The
+#: OpenAI adapter appears with a stubbed delegate: same contract, no
+#: network, no cost.
 EMBEDDER_IMPLEMENTATIONS: dict[str, Callable[[], Embedder]] = {
     "fake": FakeEmbedder,
+    "openai-adapter": lambda: OpenAIEmbedder(StubEmbeddings(), model="text-embedding-3-large"),
 }
 
 SAMPLE_TEXTS = [
