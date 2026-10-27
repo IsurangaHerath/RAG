@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1-23 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1-24 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
 > the embedding layer (contract, OpenAI adapter, batching and bounded
@@ -74,7 +74,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1-23):**
+**Implemented and tested (Stages 1-24):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -148,13 +148,20 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   fallible step runs before that one destructive write, so a failed
   embed leaves the previous version intact instead of vanished, and a
   missing file comes back as a typed result rather than an exception
-- ✅ **842 tests passing**, with the chunking, embedding and pipeline
-  modules and the CLI measured at 100% branch-inclusive coverage
+- ✅ Persistent vector indexing over Chroma: one cosine collection whose
+  rows carry the chunk id, text and the metadata schema, upserts that
+  replace rather than append so the overwrite protocol writes through to
+  real storage, a delete that reports its removed count, and chroma's
+  raw exceptions translated into the shared error hierarchy — proven by
+  running the ingest pipeline twice against a real on-disk index and
+  reopening it with a second instance to show the data persists
+- ✅ **859 tests passing**, with the chunking, embedding, pipeline and
+  storage modules and the CLI measured at 100% branch-inclusive coverage
   alongside the rest of the pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
+- ⬜ ChromaDB query path, document registry and a CLI index command (Stages 25–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
 - ⬜ Grounded answer generation with citations (Stages 37–44)
 - ⬜ Evaluation metrics and configuration experiments (Stages 45–52)

@@ -91,7 +91,7 @@ RAG/
 │   │   ├── batching.py      # Stage 21: batched calls, bounded retries/backoff
 │   │   └── generation.py    # Stage 22: chunks → aligned vectors (embed step)
 │   ├── storage/             # Stages 24–27
-│   │   ├── chroma.py        # VectorIndex impl over persistent Chroma
+│   │   ├── chroma.py        # Stage 24: VectorIndex write path over persistent Chroma
 │   │   └── registry.py      # DocumentRegistry (status, checksum)
 │   ├── retrieval/           # Stages 30–35
 │   │   ├── retriever.py     # top-k semantic search
@@ -821,11 +821,16 @@ Responsibility: persistence + retrieval of vectors; lifecycle state of documents
 ```python
 class VectorIndex(Protocol):
     def upsert(self, chunks: Sequence[Chunk], vectors: Sequence[vector]) -> None: ...
+        # implemented Stage 24 (§5.3.1); satisfies §5.16's ChunkStore
+        # structurally, so the pipeline writes through to real storage
     def similarity_search(self, query: str, *, k: int,
                           filter: MetadataFilter | None = None) -> list[RetrievedChunk]: ...
         # MetadataFilter e.g. {"doc_id": {"$in": [...]}, "section": "Requirements"}
+        # not yet — needs RetrievedChunk to return (§5.4), lands with retrieval
     def delete_document(self, doc_id: str) -> int: ...          # returns chunks removed
+        # implemented Stage 24 (§5.3.1)
     def count(self) -> int: ...
+        # implemented Stage 24 (§5.3.1)
 
 class DocumentRegistry(Protocol):
     def create(self, doc: Document) -> None: ...
@@ -846,6 +851,58 @@ the storage for it does not exist yet. Same name, same contract, so the swap
 is a change of where the lookup runs, not of what it means.
 
 Chroma specifics: single persistent collection `techdocs` (HNSW, cosine), `persist_directory` on a Docker volume in single-node mode or Chroma server mode if the api/worker split needs a network share. Metadata schema: `doc_id, chunk_id, filename, page, section, media_type, ingested_at`.
+
+### 5.3.1 Chroma index write path (`storage/chroma.py`) — implemented in Stage 24
+
+The first of §5.3's two stores, and the write half of its
+`VectorIndex` contract: `upsert`, `delete_document` and `count` over a
+persistent collection — precisely the three methods
+`IngestPipeline` (§5.16) needed to stop depending on its in-memory
+double. The class satisfies §5.16's `ChunkStore` structurally (same
+method names, same signatures), so the pipeline's store argument moved
+from the test double to real storage with no glue code, and a test runs
+the whole pipeline against a real on-disk index.
+
+**§5.3's chroma specifics, implemented literally.** One collection
+`techdocs`, HNSW with cosine distance — cosine because retrieval cares
+about direction and embedding models do not promise magnitude.
+`persist_directory` comes from `Settings.chroma_persist_dir` rather than
+a hard-coded path, which is also how tests keep their writes inside
+temporary directories. Rows are keyed by `chunk_id`; each carries the
+chunk's text (retrieval quotes it back later) plus the metadata schema
+`doc_id, chunk_id, filename, page, section, media_type, ingested_at` —
+the first four from `filename`/`media_type`/`page`/`section`, copied
+verbatim out of `Chunk.metadata` exactly as §5.11 designed the chunker
+to provide them, and the rest written by the index.
+
+**The index's three keys are written last.** `doc_id`, `chunk_id` and
+`ingested_at` overwrite any same-named key a chunk might carry, because
+`doc_id` is the field `delete_document` filters on: a mislabelled chunk
+that could spoof it would make the overwrite protocol (§5.16) delete or
+spare the wrong document's rows.
+
+**No embeddings happen here.** Vectors arrive already aligned by
+§5.15, so the collection is created without an embedding function and a
+write can never trigger a model download. `similarity_search` is
+deliberately absent until `RetrievedChunk` exists to return (§5.4); when
+it lands, it will embed with our `Embedder` and query this same
+collection — a new method, not a change to these.
+
+**Error translation is a policy, not a blanket `try`.** Chroma speaks
+`ChromaError` and its subclasses, the filesystem speaks `OSError`, the
+store beneath speaks `sqlite3.Error` — all three become
+`DependencyError` (`dependency_unavailable`), with the original message
+kept in `detail` only. Two codes stay with the embedder family by
+deliberate choice: a chunk/vector count mismatch is caught *before*
+chroma's bare `ValueError` as `embedding_count_mismatch`, and chroma's
+`InvalidArgumentError` — reachable through our typed API only as "a
+vector disagreed with the collection's dimension" — reports
+`embedding_dimension_mismatch`. Every existing holder of both codes
+raises `DependencyError` too, so one alert rule still catches the same
+failure class wherever it is first noticed (the §5.15 rule, applied to
+a second seam). A blank collection name is rejected up front as a
+`ValidationError`, so caller mistakes get a 400-shaped error rather than
+whatever chroma might make of them.
 
 ### 5.4 Retrieval
 
