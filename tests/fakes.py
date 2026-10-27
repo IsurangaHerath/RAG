@@ -15,11 +15,19 @@ import hashlib
 import math
 import re
 from collections.abc import Callable, Sequence
+from types import SimpleNamespace
+
+import openai
 
 from app.domain.errors import ValidationError
 from app.embeddings.base import require_embedding_text
 
-__all__ = ["FakeEmbedder", "StubEmbeddings"]
+__all__ = [
+    "FakeEmbedder",
+    "StubEmbeddings",
+    "openai_connection_error",
+    "openai_status_error",
+]
 
 #: Words are the unit of "similarity" for this double. Deliberately naive.
 _TOKEN_RE = re.compile(r"\w+")
@@ -106,19 +114,24 @@ class StubEmbeddings:
 
     * ``error`` — raised on every call, to exercise translation of
       provider exceptions into the project's error hierarchy;
+    * ``errors`` — a queue: one exception raised per call, then normal
+      service resumes, to exercise retry-then-succeed;
     * ``mutate`` — corrupts otherwise valid output (wrong count, NaN,
       ragged dimensions) to exercise response validation.
 
-    ``calls`` and ``queries`` record what reached the delegate, so tests
-    can assert validation happens *before* the provider would have been
-    paid a round trip.
+    ``calls``, ``batches`` and ``queries`` record what reached the
+    delegate, so tests can assert validation happens *before* the
+    provider would have been paid a round trip, and that batching split
+    the work as expected.
     """
 
     def __init__(self, *, dimension: int = 64) -> None:
         self._fake = FakeEmbedder(dimension=dimension)
         self.error: BaseException | None = None
+        self.errors: list[BaseException] = []
         self.mutate: Callable[[list[list[float]]], list[list[float]]] | None = None
         self.calls = 0
+        self.batches: list[list[str]] = []
         self.queries: list[str] = []
 
     def embed_documents(
@@ -126,6 +139,9 @@ class StubEmbeddings:
     ) -> list[list[float]]:
         """Return (optionally corrupted) vectors, one per text, in order."""
         self.calls += 1
+        self.batches.append(list(texts))
+        if self.errors:
+            raise self.errors.pop(0)
         if self.error is not None:
             raise self.error
         vectors = self._fake.embed_documents(texts)
@@ -135,9 +151,40 @@ class StubEmbeddings:
         """Return (optionally corrupted) single-vector query embedding."""
         self.calls += 1
         self.queries.append(text)
+        if self.errors:
+            raise self.errors.pop(0)
         if self.error is not None:
             raise self.error
         vector = self._fake.embed_query(text)
         if self.mutate:
             return self.mutate([vector])[0]
         return vector
+
+
+def openai_status_error(
+    provider_cls: type[openai.APIStatusError],
+    status: int,
+    *,
+    message: str = "provider said no",
+) -> openai.APIStatusError:
+    """Build an openai HTTP error without a network.
+
+    openai's errors want an ``httpx.Response``; they only read a few
+    attributes off it (status code, headers, request), so a plain
+    namespace answers just as well and keeps ``httpx`` out of the test
+    imports.
+    """
+    response = SimpleNamespace(
+        status_code=status,
+        headers={},
+        request=SimpleNamespace(url="https://api.openai.com/v1/embeddings", method="POST"),
+    )
+    return provider_cls(message, response=response, body=None)  # type: ignore[arg-type]
+
+
+def openai_connection_error(*, message: str = "Connection error.") -> openai.APIConnectionError:
+    """Build a connection-failure error (no network, no response object)."""
+    return openai.APIConnectionError(
+        message=message,
+        request=SimpleNamespace(url="https://api.openai.com/v1/embeddings"),  # type: ignore[arg-type]
+    )

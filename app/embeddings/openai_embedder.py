@@ -7,12 +7,13 @@ implementation of it, and it does three jobs around
 1. **Validate input** with the shared rule from ``base.py`` — blank text
    is a caller bug, answered locally with ``empty_embedding_input``
    rather than paid for with a round trip.
-2. **Delegate** the actual embedding. Deliberately *no* batching or retry
-   policy lives here: the client is built with ``max_retries=0`` so the
-   transport cannot invent retries of its own, because one visible,
-   testable policy for bounded retries with backoff belongs to
-   ``batching.py`` (Stage 21). Two retry policies stacking would make
-   worst-case latency a multiplication nobody could reason about.
+2. **Delegate in batches, through one retry policy.** ``iter_batches``
+   splits the texts (128 per request by default) and ``with_retries``
+   wraps every call — both supplied by ``batching.py`` (Stage 21), which
+   owns the policy end to end: the transport itself stays at
+   ``max_retries=0`` so no second, invisible policy can stack on top
+   (three retries behind three retries means nine requests, and nobody
+   can reason about the worst case).
 3. **Validate output and translate failures.** The provider's response is
    checked before any caller sees it (count, dimension consistency,
    finite components), and provider exceptions become our error
@@ -39,8 +40,9 @@ own construction.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
-from typing import Protocol
+from collections.abc import Callable, Sequence
+from functools import partial
+from typing import Protocol, TypeVar
 
 import openai
 from langchain_openai import OpenAIEmbeddings
@@ -54,8 +56,18 @@ from app.domain.errors import (
     RAGError,
 )
 from app.embeddings.base import require_embedding_text
+from app.embeddings.batching import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_RETRY_WAIT,
+    WaitBaseT,
+    iter_batches,
+    require_batch_size,
+    with_retries,
+)
 
 __all__ = ["OpenAIEmbedder"]
+
+T = TypeVar("T")
 
 
 class _ClientLike(Protocol):
@@ -89,11 +101,28 @@ class OpenAIEmbedder:
         learns the dimension from the first response and refuses a
         different one afterwards, so a mid-run change fails loudly
         instead of writing vectors two sizes into one store.
+    batch_size:
+        Texts per delegated request (validated: >= 1). Batches are
+        validated one at a time, and the dimension learned from the
+        first batch is enforced on every later one.
+    retry_wait:
+        Tenacity wait strategy between attempts (§5.14 owns the
+        policy). Injectable so tests exercise retry paths in
+        milliseconds; production uses the exponential default.
     """
 
-    def __init__(self, client: _ClientLike, *, model: str) -> None:
+    def __init__(
+        self,
+        client: _ClientLike,
+        *,
+        model: str,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        retry_wait: WaitBaseT = DEFAULT_RETRY_WAIT,
+    ) -> None:
         self._client = client
         self._model = model
+        self._batch_size = require_batch_size(batch_size)
+        self._retry_wait = retry_wait
         self._dimension: int | None = None
 
     @classmethod
@@ -111,8 +140,8 @@ class OpenAIEmbedder:
             # ``timeout`` is the constructor's alias for the
             # ``request_timeout`` field — pydantic names, both valid.
             timeout=settings.request_timeout_seconds,
-            # Retries are batching.py's job (Stage 21). With 0 here the
-            # openai transport never retries behind our back.
+            # Retries live in batching.py; with 0 here the transport
+            # cannot stack a second, invisible policy on top of it.
             max_retries=0,
         )
         return cls(client, model=settings.embedding_model)
@@ -123,24 +152,41 @@ class OpenAIEmbedder:
         return self._model
 
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
-        """Embed every text in order, validating input first and output after."""
+        """Embed every text in order — batched, retried, validated per batch.
+
+        All-or-nothing: if a batch fails after exhausting retries the
+        whole call raises, rather than returning a partial prefix the
+        caller would have to reason about chunk by chunk.
+        """
         validated = [require_embedding_text(text) for text in texts]
         if not validated:
             return []  # nothing to embed is not an error, and not a request
-        try:
-            vectors = self._client.embed_documents(validated)
-        except openai.OpenAIError as exc:
-            raise _translate(exc) from exc
-        return self._validate(vectors, expected_count=len(validated))
+        vectors: list[list[float]] = []
+        for batch in iter_batches(validated, self._batch_size):
+            call = partial(self._client.embed_documents, batch)
+            batch_vectors = self._call(call, what="embedding batch")
+            vectors.extend(self._validate(batch_vectors, expected_count=len(batch)))
+        return vectors
 
     def embed_query(self, text: str) -> list[float]:
         """Embed one query into the same space, with the same checks."""
         require_embedding_text(text)
+        vector = self._call(lambda: self._client.embed_query(text), what="embedding query")
+        return self._validate([vector], expected_count=1)[0]
+
+    def _call(self, operation: Callable[[], T], *, what: str) -> T:
+        """Run one provider call through the retry policy, then translate.
+
+        The retry wraps the *raw* client call so the policy can classify
+        raw OpenAI exceptions precisely — 429/5xx/connection are retried,
+        auth and 400 are not (§5.14). Translation happens only after the
+        policy has given up, so the error callers receive is the real
+        final failure, just in our hierarchy.
+        """
         try:
-            vector = self._client.embed_query(text)
+            return with_retries(operation, wait=self._retry_wait, what=what)
         except openai.OpenAIError as exc:
             raise _translate(exc) from exc
-        return self._validate([vector], expected_count=1)[0]
 
     # -- response validation ------------------------------------------------
 

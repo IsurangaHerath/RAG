@@ -34,6 +34,7 @@ REQUIRED_PACKAGES: dict[str, str] = {
     "pydantic": "pydantic",
     "pydantic-settings": "pydantic_settings",
     "structlog": "structlog",
+    "tenacity": "tenacity",
     "numpy": "numpy",
     "pandas": "pandas",
     "scikit-learn": "sklearn",

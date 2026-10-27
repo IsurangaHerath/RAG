@@ -1,20 +1,21 @@
-"""Tests for the OpenAI adapter: validation, error translation, wiring.
+"""Tests for the OpenAI adapter: validation, batching, retries, wiring.
 
 Everything here runs offline. The adapter's delegate is a stub shaped
-like ``OpenAIEmbeddings``, so what is tested is *our* behaviour — input
-rules, response checks, and how provider failures become the project's
-error hierarchy — not OpenAI's. The contract suite in
-``test_embedder_contract.py`` runs the adapter through the same shared
-rules as every other implementation.
+like ``OpenAIEmbeddings``, and every adapter is built with an instant
+retry wait, so what is tested is *our* behaviour — input rules, batch
+splitting, response checks, and how provider failures become the
+project's error hierarchy — never OpenAI's, and never a real sleep.
+The contract suite in ``test_embedder_contract.py`` runs the adapter
+through the same shared rules as every other implementation; the retry
+policy itself is tested in ``test_batching.py``.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import openai
 import pytest
 from langchain_openai import OpenAIEmbeddings
+from tenacity import wait_none
 
 from app.config import Settings, SettingsError
 from app.domain.errors import (
@@ -24,35 +25,19 @@ from app.domain.errors import (
     ValidationError,
 )
 from app.embeddings.openai_embedder import OpenAIEmbedder
-from tests.fakes import FakeEmbedder, StubEmbeddings
+from tests.fakes import (
+    FakeEmbedder,
+    StubEmbeddings,
+    openai_connection_error,
+    openai_status_error,
+)
 
 MODEL = "text-embedding-3-large"
 
 
-def _adapter(stub: StubEmbeddings) -> OpenAIEmbedder:
-    """Build the adapter under test around a fresh stub delegate."""
-    return OpenAIEmbedder(stub, model=MODEL)
-
-
-def _provider_error(
-    provider_cls: type[openai.APIStatusError],
-    status: int,
-    *,
-    message: str = "provider said no",
-) -> openai.APIStatusError:
-    """Build an openai exception without a network.
-
-    openai's errors want an ``httpx.Response``; they only read a few
-    attributes off it (status code, headers, request), so a plain
-    namespace answers just as well and keeps ``httpx`` out of the test
-    imports.
-    """
-    response = SimpleNamespace(
-        status_code=status,
-        headers={},
-        request=SimpleNamespace(url="https://api.openai.com/v1/embeddings", method="POST"),
-    )
-    return provider_cls(message, response=response, body=None)  # type: ignore[arg-type]
+def _adapter(stub: StubEmbeddings, **kwargs: object) -> OpenAIEmbedder:
+    """Build the adapter under test with instant retries (no sleeping)."""
+    return OpenAIEmbedder(stub, model=MODEL, retry_wait=wait_none(), **kwargs)
 
 
 # --- Input rules: nothing reaches the provider ----------------------------
@@ -92,6 +77,35 @@ def test_queries_use_the_clients_query_path() -> None:
     stub = StubEmbeddings()
     _adapter(stub).embed_query("how do rate limits work?")
     assert stub.queries == ["how do rate limits work?"]
+
+
+# --- Batching: split in order, reassemble in order ------------------------
+
+
+def test_batches_are_split_in_order_and_results_concatenated() -> None:
+    """Five texts at batch size 2 means three requests, same final order."""
+    stub = StubEmbeddings()
+    adapter = _adapter(stub, batch_size=2)
+    texts = ["alpha", "beta", "gamma", "delta", "epsilon"]
+    assert adapter.embed_documents(texts) == FakeEmbedder().embed_documents(texts)
+    assert stub.batches == [["alpha", "beta"], ["gamma", "delta"], ["epsilon"]]
+
+
+def test_constructor_rejects_an_invalid_batch_size() -> None:
+    """A bad size fails on the line that set it, not mid-document."""
+    with pytest.raises(ValidationError) as excinfo:
+        _adapter(StubEmbeddings(), batch_size=0)
+    assert excinfo.value.code == "invalid_batch_size"
+
+
+def test_transient_rate_limit_is_retried_until_success() -> None:
+    """One 429 from the provider, then normal service: one extra call."""
+    stub = StubEmbeddings()
+    stub.errors = [openai_status_error(openai.RateLimitError, 429)]
+    adapter = _adapter(stub)
+    vectors = adapter.embed_documents(["hello world"])
+    assert len(vectors) == 1
+    assert stub.calls == 2
 
 
 # --- Response validation: the provider does not get the benefit of doubt --
@@ -210,9 +224,13 @@ def test_provider_status_errors_are_translated(
     expected_type: type[DependencyError],
     expected_code: str,
 ) -> None:
-    """Each provider failure lands on the matching project error."""
+    """Each provider failure lands on the matching project error.
+
+    For retryable statuses (429, 500) this also proves translation
+    happens *after* the retries give up, not instead of them.
+    """
     stub = StubEmbeddings()
-    stub.error = _provider_error(provider_cls, status)
+    stub.error = openai_status_error(provider_cls, status)
     with pytest.raises(expected_type) as excinfo:
         _adapter(stub).embed_documents(["hello world"])
     error = excinfo.value
@@ -224,9 +242,7 @@ def test_provider_status_errors_are_translated(
 def test_connection_failures_become_dependency_errors() -> None:
     """Unreachable endpoint is a 502-class dependency problem."""
     stub = StubEmbeddings()
-    stub.error = openai.APIConnectionError(
-        request=SimpleNamespace(url="https://api.openai.com/v1/embeddings")  # type: ignore[arg-type]
-    )
+    stub.error = openai_connection_error()
     with pytest.raises(DependencyError) as excinfo:
         _adapter(stub).embed_query("hello")
     error = excinfo.value
@@ -242,7 +258,7 @@ def test_provider_message_never_leaks_into_our_error() -> None:
     """
     secret = "sk-live-ABC123secret"
     stub = StubEmbeddings()
-    stub.error = _provider_error(
+    stub.error = openai_status_error(
         openai.AuthenticationError,
         401,
         message=f"Incorrect API key provided: {secret}",
@@ -271,8 +287,8 @@ def test_from_settings_wires_configuration_into_the_client() -> None:
     assert isinstance(client, OpenAIEmbeddings)
     assert client.model == settings.embedding_model
     assert client.request_timeout == 12.5
-    # One retry policy, and it belongs to batching.py — the transport
-    # must not invent retries of its own behind our back.
+    # One retry policy, and it lives in batching.py — the transport must
+    # not stack a second, invisible one on top.
     assert client.max_retries == 0
 
 

@@ -43,6 +43,11 @@ pydantic-settings==2.16.0
 # withholds document text unless LOG_DOCUMENT_CONTENT is deliberately enabled.
 structlog==26.1.0
 
+# ---- Resilience -----------------------------------------------------------
+# Bounded retries with exponential backoff for provider calls; the whole
+# policy lives in app/embeddings/batching.py.
+tenacity==9.2.1
+
 # ---- Data science / evaluation -------------------------------------------
 numpy==2.5.4
 pandas==3.0.6

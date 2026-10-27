@@ -1,10 +1,12 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1-20 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1-21 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
-> embedding, retrieval and answer-generation are **designed but not yet
-> implemented**, and no benchmark results exist yet.
+> the embedding layer (contract, OpenAI adapter, batching and bounded retries)
+> is built and tested offline but **not yet wired into a pipeline**, and
+> retrieval and answer-generation are **designed but not yet implemented**.
+> No benchmark results exist yet.
 > See [Project status](#project-status) for exactly what does and does not work.
 
 A Retrieval-Augmented Generation (RAG) system for technical documents: upload
@@ -72,12 +74,12 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1-20):**
+**Implemented and tested (Stages 1-21):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
 - ✅ Package scaffold for every planned component
-- ✅ Windows virtualenv with 17 pinned direct dependencies
+- ✅ Windows virtualenv with 18 pinned direct dependencies
 - ✅ Centralized, validated configuration (`.env.example` → `.env`)
 - ✅ Secret handling: `SecretStr` + tests proving the key never reaches a log
 - ✅ One shared error hierarchy mapped to HTTP status codes
@@ -127,13 +129,19 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   translates provider failures into the shared error hierarchy while never
   copying the provider's message, so a credential cannot reach logs; all of
   it proven through a stubbed delegate, with no network call required
-- ✅ **774 tests passing**, with the chunking and embedding modules and the
+- ✅ Batched embedding calls behind one bounded retry policy: texts are split
+  into order-preserving batches, transient provider failures (429, 5xx,
+  dropped connections) are retried with capped exponential backoff and
+  jitter, while a wrong key or a bad request fails immediately — and each
+  retry logs only the attempt number, wait and error *type*, never the
+  provider's message
+- ✅ **802 tests passing**, with the chunking and embedding modules and the
   CLI measured at 100% branch-inclusive coverage alongside the rest of the
   pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ Embedding generation (Stages 21–23)
+- ⬜ Embedding generation (Stages 22–23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
 - ⬜ Grounded answer generation with citations (Stages 37–44)

@@ -87,7 +87,7 @@ RAG/
 │   ├── embeddings/          # Stages 19–22
 │   │   ├── base.py          # Stage 19: provider-agnostic Embedder interface
 │   │   ├── openai_embedder.py  # Stage 20: OpenAI adapter + validation
-│   │   └── batching.py      # batched calls, bounded retries/backoff
+│   │   └── batching.py      # Stage 21: batched calls, bounded retries/backoff
 │   ├── storage/             # Stages 24–27
 │   │   ├── chroma.py        # VectorIndex impl over persistent Chroma
 │   │   └── registry.py      # DocumentRegistry (status, checksum)
@@ -258,7 +258,7 @@ class Chunker(Protocol):
 class Embedder(Protocol):
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]: ...
         # batched (e.g. 128), retries with exponential backoff on 429/5xx —
-        # still pending (Stage 21); interface Stage 19 (§5.12),
+        # batching/retries Stage 21 (§5.14); interface Stage 19 (§5.12),
         # adapter Stage 20 (§5.13)
     def embed_query(self, text: str) -> list[float]: ...
 
@@ -1193,9 +1193,11 @@ would break the reproducibility every other test assumes. The double lives
 under `tests/` rather than `app/` precisely because it must never be
 mistaken for a provider in production code.
 
-**Not implemented:** batching and bounded retries with backoff (Stage 21+)
-— until then the adapter embeds a batch in one delegation and fails fast
-on 429/5xx. Dimension *policy* stays out of the contract: it requires one
+**Batching and retries now live behind the contract** (§5.14): the adapter
+embeds texts in order-preserving batches and every call runs through one
+bounded retry policy, so implementations of the contract are expected to
+absorb transient provider failures rather than surface them on the first
+429. Dimension *policy* stays out of the contract: it requires one
 consistent dimension but pins no number, leaving `Settings.embedding_model`
 in charge of what the vectors actually are.
 
@@ -1233,14 +1235,15 @@ the rule `errors.py` states outright. The original exception rides along as
 responses stay clean. A test pins this by asserting the secret never
 appears anywhere in the raised error.
 
-**No retries here, on purpose.** The client is built with
+**Still no retries here, on purpose.** The client is built with
 `max_retries=0`, so the openai transport cannot invent retry policy behind
-our back; bounded retries with exponential backoff arrive with
-`batching.py` (Stage 21), where one policy can be seen, tested and counted
-instead of two silently multiplying worst-case latency. `from_settings`
-assembles that client from `Settings` — model, timeout, and the key via
-`require_openai_key()`, which fails with an actionable message *before* any
-client exists rather than as a cryptic 401 from the API.
+our back; the bounded retries with exponential backoff live in
+`batching.py` (§5.14), wrapping this adapter's calls, where one policy can
+be seen, tested and counted instead of two silently multiplying worst-case
+latency. `from_settings` assembles that client from `Settings` — model,
+timeout, and the key via `require_openai_key()`, which fails with an
+actionable message *before* any client exists rather than as a cryptic 401
+from the API.
 
 **Offline by construction.** The delegate is typed by a local
 `_ClientLike` Protocol — langchain's shape, which takes `list[str]` where
@@ -1252,11 +1255,61 @@ provider errors, and the adapter appears in the contract registry with it,
 so the shared suite now runs against two implementations. No live call has
 been made — that still needs a real `OPENAI_API_KEY`.
 
-**Not implemented:** batching and the bounded retry policy (Stage 21+);
-`dimensions` is never set, so vectors come at whatever the model's full
-size is (`.env.example` warns that changing `EMBEDDING_MODEL` invalidates
-the index); no token accounting beyond what `OpenAIEmbeddings` does
-internally to split over-long inputs.
+**Not implemented:** `dimensions` is never set, so vectors come at whatever
+the model's full size is (`.env.example` warns that changing
+`EMBEDDING_MODEL` invalidates the index); no token accounting beyond what
+`OpenAIEmbeddings` does internally to split over-long inputs.
+
+### 5.14 Batching and retries (`embeddings/batching.py`) — implemented in Stage 21
+
+One embedding call can fail in two unrelated ways, and each needs a
+different answer. **Too much at once** is answered by `iter_batches`:
+consecutive, order-preserving slices of at most `DEFAULT_BATCH_SIZE` (128,
+the sketch's "e.g. 128" in §5.2). The last batch may be shorter, empty
+input yields no batches at all, and `require_batch_size` rejects sizes
+below 1 with `invalid_batch_size` — a bad size fails on the line that set
+it, not as a mysteriously short document mid-run. Ordering is the whole
+point: vector *i* must stay paired with text *i*, or chunk ids start
+citing the wrong text downstream.
+
+**Not right now** is answered by `with_retries`, and the classification is
+the interesting part. Retryable: HTTP 429, every 5xx, and connection
+failures (`APIConnectionError` and the timeout beneath it — the request
+may never have reached the provider, so nothing rejected it). Not
+retryable: any other 4xx, because 401/403 mean the key is wrong and 400
+means the request is wrong — the identical retry produces the identical
+failure, it only buys quadratic latency. Also not retryable: anything
+that is not an OpenAI exception at all, which would be our own bug
+wearing a network's clothes; waiting two seconds does not fix a typo.
+The predicate runs on the *raw* client exceptions, before §5.13's
+translation, precisely because classification needs the real HTTP status.
+
+**Bounded is a promise, not a preference.** `DEFAULT_RETRY_ATTEMPTS` is 4
+(one try plus three retries); waits are exponential (1s, 2s, 4s, 8s…) capped
+at 8 seconds with up to 0.5s of jitter, so a burst of callers does not retry
+in lockstep. On exhaustion the *original* exception propagates (tenacity's
+`reraise`), so translation still happens in §5.13 and callers still receive
+`ProviderRateLimitError` or `DependencyError`. The adapter's whole
+`embed_documents` call is all-or-nothing: if a middle batch gives up, the
+partial prefix is discarded rather than returned with unknown chunk ids
+missing. The client's own `max_retries=0` (§5.13) remains what makes this
+*one* policy — three retries behind three retries would be nine requests,
+and nobody could reason about the worst case.
+
+**Retries are logged, minimally.** Each retry emits one warning carrying
+the operation label, attempt number, wait in seconds, and the exception's
+*type name* — never its message, which for an OpenAI auth failure quotes
+the rejected key. The dependency is `tenacity` (pinned directly in
+`requirements.txt` since this stage; §7.3 updated accordingly).
+
+**Testing sleeps no seconds.** `with_retries` accepts an injected wait
+strategy and the adapter accepts an injected `retry_wait`, so the retry
+tests run with `wait_none()` and still prove attempt counts,
+classification, exhaustion and log shape; the real exponential schedule was
+exercised outside the suite by running the defaults and timing them. Batching
+happens *inside* the adapter, so the contract suite (§5.12) needs no
+change — its registered adapter simply passes texts through the same
+batches a single delegation used to be.
 
 ## 6. Data Flow
 
@@ -1408,9 +1461,8 @@ interpreter that lacks the dependencies.
 | Layer | Package | Needed from stage | Purpose |
 |---|---|---|---|
 | Web | `python-multipart` | 55 | multipart document upload |
-| Docs | `pypdf`, `python-docx`, `beautifulsoup4` | 11–12 | PDF/DOCX/HTML parsing |
-| Ops | `tenacity` | 21 | bounded retries |
-| Test | `pytest-cov`, `pytest-asyncio` | 07 | coverage, async tests |
+| Docs | `python-docx`, `beautifulsoup4` | if DOCX/HTML loaders land | DOCX/HTML parsing (current loaders cover TXT/MD/PDF via `pypdf`) |
+| Test | `pytest-asyncio` | 07 | async tests (`pytest-cov` already ships) |
 | Quality (opt.) | `ragas`, `tiktoken`, `sentence-transformers` | 45–52 / 31 | eval, token budgeting, rerank |
 
 LangChain 1.x moved classes that lived in `langchain` during 0.x, so all
