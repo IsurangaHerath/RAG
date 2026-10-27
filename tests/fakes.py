@@ -20,9 +20,11 @@ from types import SimpleNamespace
 import openai
 
 from app.domain.errors import ValidationError
+from app.domain.models import Chunk
 from app.embeddings.base import require_embedding_text
 
 __all__ = [
+    "FakeChunkStore",
     "FakeEmbedder",
     "StubEmbeddings",
     "openai_connection_error",
@@ -188,3 +190,40 @@ def openai_connection_error(*, message: str = "Connection error.") -> openai.API
         message=message,
         request=SimpleNamespace(url="https://api.openai.com/v1/embeddings"),  # type: ignore[arg-type]
     )
+
+
+class FakeChunkStore:
+    """In-memory stand-in for the vector index (§5.3's ``VectorIndex``).
+
+    Holds chunks exactly as a store would — ``doc_id`` → ``chunk_id`` →
+    vector — and records every operation in order, so tests can assert
+    *when* the pipeline's destructive step happens, not merely that it
+    did. ``fail_upsert_with`` turns the next writes into a typed failure
+    for the failure paths.
+    """
+
+    def __init__(self) -> None:
+        self.data: dict[str, dict[str, list[float]]] = {}
+        self.ops: list[tuple[str, str]] = []
+        self.fail_upsert_with: BaseException | None = None
+
+    def upsert(self, chunks: Sequence[Chunk], vectors: Sequence[list[float]]) -> None:
+        if self.fail_upsert_with is not None:
+            raise self.fail_upsert_with
+        self.ops.append(("upsert", chunks[0].doc_id if chunks else ""))
+        for chunk, vector in zip(chunks, vectors, strict=True):
+            self.data.setdefault(chunk.doc_id, {})[chunk.chunk_id] = vector
+
+    def delete_document(self, doc_id: str) -> int:
+        self.ops.append(("delete", doc_id))
+        return len(self.data.pop(doc_id, {}))
+
+    def chunk_ids(self, doc_id: str) -> tuple[str, ...]:
+        """Stored chunk ids in insertion order (fresh after a replace)."""
+        return tuple(self.data.get(doc_id, {}))
+
+    def count(self, doc_id: str | None = None) -> int:
+        """Chunks stored for one document, or across every document."""
+        if doc_id is not None:
+            return len(self.data.get(doc_id, {}))
+        return sum(len(chunks) for chunks in self.data.values())

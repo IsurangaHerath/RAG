@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1-22 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1-23 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
 > the embedding layer (contract, OpenAI adapter, batching and bounded
@@ -74,7 +74,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1-22):**
+**Implemented and tested (Stages 1-23):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -141,13 +141,19 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   and a counts-only log line — proven both with a deliberately
   contract-breaking embedder double and with the real adapter across
   batches
-- ✅ **820 tests passing**, with the chunking and embedding modules and the
-  CLI measured at 100% branch-inclusive coverage alongside the rest of the
-  pipeline modules
+- ✅ Idempotent re-ingestion: the ingest pipeline decides before doing —
+  an unchanged file never reaches the chunker, embedder or store, while
+  an edited one replaces via delete-by-`doc_id` then upsert so no stale
+  chunk (including the tail of a shortened document) can linger; every
+  fallible step runs before that one destructive write, so a failed
+  embed leaves the previous version intact instead of vanished, and a
+  missing file comes back as a typed result rather than an exception
+- ✅ **842 tests passing**, with the chunking, embedding and pipeline
+  modules and the CLI measured at 100% branch-inclusive coverage
+  alongside the rest of the pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ Idempotent re-ingestion of changed documents (Stage 23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
 - ⬜ Grounded answer generation with citations (Stages 37–44)

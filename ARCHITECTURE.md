@@ -74,14 +74,15 @@ RAG/
 │   ├── domain/
 │   │   ├── models.py        # Stage 09: Document, Chunk, RetrievedChunk, Citation, Answer
 │   │   └── errors.py        # Stage 07: error taxonomy (UploadError, ParseError, DocumentLoadError, ...)
-│   ├── ingestion/           # Stages 10–16
+│   ├── ingestion/           # Stages 10–16, 23
 │   │   ├── discovery.py     # find supported files, block path traversal
 │   │   ├── loaders.py       # Stage 11: TXT/MD -> TextDocument; re-exports load_pdf
 │   │   ├── pdf_loader.py    # Stage 12: PDF -> per-page text via pypdf
 │   │   ├── metadata.py      # Stage 13: sanitised PDF info + derived metadata
 │   │   ├── service.py       # Stage 14: orchestrates discovery → load → metadata
 │   │   ├── deduplication.py # Stage 15: stable IDs + content hashes
-│   │   └── reporting.py     # Stage 16: structured per-batch ingest report
+│   │   ├── reporting.py     # Stage 16: structured per-batch ingest report
+│   │   └── pipeline.py      # Stage 23: idempotent decide → chunk → embed → replace
 │   ├── preprocessing/
 │   │   └── chunking.py      # Stage 18: LangChain recursive text splitting
 │   ├── embeddings/          # Stages 19–22
@@ -266,6 +267,10 @@ class Embedder(Protocol):
 class IngestPipeline(Protocol):
     def run(self, doc_id: str) -> IngestResult: ...
         # load → chunk → embed → upsert → registry.update_status(INDEXED | FAILED)
+        # implemented Stage 23 (§5.16): run(path, source_path=...) — no FileStore
+        # exists to resolve ids to files yet; the result is DocumentIngestResult
+        # (IngestResult is §5.2.7's batch report), and update_status waits for
+        # the registry (Stages 24–27), which closes the delete→upsert window
 ```
 
 ### 5.2.1 Discovery (`ingestion/discovery.py`) — implemented in Stage 10
@@ -1351,6 +1356,86 @@ integration test runs the real adapter with `batch_size=2` across five
 chunks and shows the batches rejoining into one aligned set, vector for
 chunk, against `FakeEmbedder`'s known output.
 
+### 5.16 Idempotent re-ingestion (`ingestion/pipeline.py`) — implemented in Stage 23
+
+The embedding stages can produce a document's vectors and §5.2.6 can say
+whether the document needs producing at all. What was missing is the act
+itself — and, specifically, the *second* act: running ingest twice must
+leave the store exactly as running it once did, and re-ingesting an
+edited file must leave only the new version behind. §6.1 states this as a
+property of the system ("ingestion is idempotent"); this module is where
+it is enforced.
+
+`IngestPipeline.run(path, *, source_path, media_type=None)` performs
+**decide → load → chunk → embed → delete → upsert → remember** and always
+returns a `DocumentIngestResult` — one of four actions (`created`,
+`replaced`, `skipped`, `failed`) with a stable `code` and counts. It
+catches only `RAGError`; anything else escaping is a defect and is
+allowed to propagate, following §5.2.2's rule.
+
+**Decide before doing.** `classify` runs first, against the documents the
+pipeline already knows. An unchanged file returns before the chunker, the
+embedder or the store is touched — skipping is what makes re-ingestion
+*cheap*, not merely correct. This is §5.2.6's verdict being *executed*
+rather than merely reported.
+
+**Replace, never append.** The write is `delete_document(doc_id)` then
+`upsert`. Old and new chunk ids overlap (both count from `doc_id:0`), so
+appending would either collide or leave a shortened document's old tail
+retrievable forever — a modified file would serve stale chunks with no
+visible symptom. The delete runs even for a brand-new document: an
+earlier attempt may have crashed half-written, and that defensive delete
+is what makes *retrying* a crash idempotent instead of duplicating.
+
+**All fallible work first, the destructive step last.** Load, chunk and
+embed happen before `delete_document`. If the provider is down and
+§5.14's retries exhaust, the previous version's chunks are still in the
+store — stale beats missing, and the next run simply tries again. What
+remains is the narrow `delete → upsert` window: a crash there leaves the
+document absent until the next run. The planned registry flow closes it
+by marking a document `INDEXED` only *after* a successful upsert (§5.2's
+sketch), so "not marked" is precisely what tells the next run to redo the
+work.
+
+**The known set is an in-memory registry stand-in.** `IngestPipeline`
+keeps the documents it has written in a private list, seeded from the
+`known` argument; lookups reuse `find_by_doc_id`/`find_by_hash` — named
+after §5.3's registry Protocol on purpose, so Stages 24–27 can swap a
+real `DocumentRegistry` in without changing this module's meaning. A
+failed run is *not* remembered (so it retries) and an empty file is *not*
+remembered (it never became a document). **The one rule seeds must
+follow:** classification hashes the loaded text and `Document.create`
+records the same value, so both sides agree by construction — a caller
+seeding documents hashed over raw file *bytes* would make every file
+read as modified.
+
+**RENAMED is detection, not policy** (§5.2.6). The default here is
+`renamed_policy="skip"`: indexing the same bytes under a second path
+doubles every retrieval hit. A caller who knows the second path is a
+deliberate independent copy passes `renamed_policy="ingest"` instead.
+
+**Deviations from §5.2's sketch, stated outright.** `run` takes a
+filesystem path plus an explicit `source_path` rather than only `doc_id`,
+because no `FileStore` exists yet to resolve ids to files (the explicit
+identity also stops a machine-specific absolute path from silently
+becoming an id — `make_doc_id` rejects those *before* the file is
+opened). Its result is `DocumentIngestResult` because §5.2.7's service
+already owns `IngestResult`. Document *status* stays `PENDING`:
+lifecycle transitions belong to the registry that does not exist yet,
+which is also why outcomes use this module's own vocabulary rather than
+`IngestStatus`.
+
+**Proven by running twice.** The tests ingest a real corpus file and
+then re-ingest it: the second run is a skip with the store's operation
+log untouched and the embedder's call count frozen; an edit to shorter
+text shows `deleted_count == old count` with the old tail id gone;
+reverting the edit restores byte-identical store state; a pre-seeded
+embedder failure after a successful first run leaves the previous chunks
+in place with *no* store operation at all — the ordering rule, asserted.
+A missing file returns a `failed` result rather than raising, and both
+the log line and `summary()` are checked to carry ids and counts but
+never document text.
+
 ## 6. Data Flow
 
 ### 6.1 Upload → index
@@ -1373,7 +1458,7 @@ Client            api                 FileStore   Registry   Queue    worker    
   │ GET /v1/documents/{id} ──▶ 200 {status:"indexed", chunks: 412, pages: 38}
 ```
 
-Failure at any stage → `status=FAILED` with `error` (e.g. `PARSE_ERROR: encrypted pdf`), other documents unaffected. Re-processing the same `doc_id` overwrites chunks (delete-by-`doc_id` then upsert) — ingestion is idempotent.
+Failure at any stage → `status=FAILED` with `error` (e.g. `PARSE_ERROR: encrypted pdf`), other documents unaffected. Re-processing the same `doc_id` overwrites chunks (delete-by-`doc_id` then upsert) — ingestion is idempotent (§5.16).
 
 ### 6.2 Query → grounded answer
 
