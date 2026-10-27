@@ -1,12 +1,12 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1-21 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1-22 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
-> the embedding layer (contract, OpenAI adapter, batching and bounded retries)
-> is built and tested offline but **not yet wired into a pipeline**, and
-> retrieval and answer-generation are **designed but not yet implemented**.
-> No benchmark results exist yet.
+> the embedding layer (contract, OpenAI adapter, batching and bounded
+> retries, and the chunk→vector embed step) is built and tested offline but
+> **not yet wired into a pipeline**, and retrieval and answer-generation are
+> **designed but not yet implemented**. No benchmark results exist yet.
 > See [Project status](#project-status) for exactly what does and does not work.
 
 A Retrieval-Augmented Generation (RAG) system for technical documents: upload
@@ -74,7 +74,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1-21):**
+**Implemented and tested (Stages 1-22):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -135,13 +135,19 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   jitter, while a wrong key or a bad request fails immediately — and each
   retry logs only the attempt number, wait and error *type*, never the
   provider's message
-- ✅ **802 tests passing**, with the chunking and embedding modules and the
+- ✅ The embed step that joins chunks to vectors: one vector per chunk in
+  order, cheap seam guards (count and shared dimension) using the same
+  error codes as the adapter, provider failures passing through untouched,
+  and a counts-only log line — proven both with a deliberately
+  contract-breaking embedder double and with the real adapter across
+  batches
+- ✅ **820 tests passing**, with the chunking and embedding modules and the
   CLI measured at 100% branch-inclusive coverage alongside the rest of the
   pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ Embedding generation (Stages 22–23)
+- ⬜ Idempotent re-ingestion of changed documents (Stage 23)
 - ⬜ ChromaDB persistent indexing and a CLI index command (Stages 24–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
 - ⬜ Grounded answer generation with citations (Stages 37–44)

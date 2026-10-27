@@ -87,7 +87,8 @@ RAG/
 │   ├── embeddings/          # Stages 19–22
 │   │   ├── base.py          # Stage 19: provider-agnostic Embedder interface
 │   │   ├── openai_embedder.py  # Stage 20: OpenAI adapter + validation
-│   │   └── batching.py      # Stage 21: batched calls, bounded retries/backoff
+│   │   ├── batching.py      # Stage 21: batched calls, bounded retries/backoff
+│   │   └── generation.py    # Stage 22: chunks → aligned vectors (embed step)
 │   ├── storage/             # Stages 24–27
 │   │   ├── chroma.py        # VectorIndex impl over persistent Chroma
 │   │   └── registry.py      # DocumentRegistry (status, checksum)
@@ -1310,6 +1311,45 @@ exercised outside the suite by running the defaults and timing them. Batching
 happens *inside* the adapter, so the contract suite (§5.12) needs no
 change — its registered adapter simply passes texts through the same
 batches a single delegation used to be.
+
+### 5.15 Embed step (`embeddings/generation.py`) — implemented in Stage 22
+
+§5.2's pipeline reads `load → chunk → embed → upsert`. Loading is
+§5.2.2/§5.2.3 and splitting is §5.11; this is the third arrow:
+`embed_chunks(embedder, chunks)` takes a document's chunks and returns one
+vector per chunk, in the same order — precisely what the `VectorIndex`
+sketch's `upsert(chunks, vectors)` pairs back. Empty input is an empty
+result, not a provider call, matching the adapter's own short-circuit.
+
+**It is a seam, so it guards the seam.** The adapter validates everything
+it receives (§5.13), but its checks are per *request* while alignment is a
+property of the whole document — batches are joined in this module, so it
+is the only place that sees them all at once. And the contract suite
+(§5.12) proves implementations behave at test time, not at 3 a.m. in
+production, so the two failures that are *silent* still deserve a runtime
+guard: a count mismatch reattaches citation *i* to chunk *j*'s text, and
+mixed dimensions would be rejected by the store far from the cause. Both
+checks are O(chunks) — counts and each vector's length — while the
+expensive per-component walk (finiteness) stays where it was already paid
+for. The error codes are deliberately the adapter's own
+(`embedding_count_mismatch`, `embedding_invalid_vector`,
+`embedding_dimension_mismatch`) so one alert rule catches the same failure
+class wherever it is first noticed, and `detail` carries ids, never
+content.
+
+**Everything else passes through untouched.** A rate limit that exhausted
+§5.14's retries arrives as `ProviderRateLimitError` and leaves as the same
+instance, so callers handle one error hierarchy regardless of which layer
+noticed first. The single info line carries `doc_id`, `chunk_count` and
+`dimension` — counts only, with or without `LOG_DOCUMENT_CONTENT`.
+
+**Proven twice over.** Unit tests drive a deliberately *disobedient*
+embedder double (the contract suite keeps conforming implementations
+honest; this one exists so the seam guards can be proven to fire), including
+a parametrised check that no failure message ever quotes chunk content. An
+integration test runs the real adapter with `batch_size=2` across five
+chunks and shows the batches rejoining into one aligned set, vector for
+chunk, against `FakeEmbedder`'s known output.
 
 ## 6. Data Flow
 
