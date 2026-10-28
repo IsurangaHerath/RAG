@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1-24 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1-25 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
 > the embedding layer (contract, OpenAI adapter, batching and bounded
@@ -74,7 +74,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1-24):**
+**Implemented and tested (Stages 1-25):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -155,13 +155,20 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   raw exceptions translated into the shared error hierarchy — proven by
   running the ingest pipeline twice against a real on-disk index and
   reopening it with a second instance to show the data persists
-- ✅ **859 tests passing**, with the chunking, embedding, pipeline and
+- ✅ The document registry over SQLite: status, checksum and the record
+  itself persisted beside the data, with every transition delegated to
+  the model's own lifecycle graph (terminal states stay terminal,
+  `failed` always keeps its reason), `create` acting as the fresh
+  record that restarts a finished document, deterministic paging and
+  hash lookups — and an ingest pipeline seeded from a real registry
+  skipping an unchanged file with no embed and no write
+- ✅ **879 tests passing**, with the chunking, embedding, pipeline and
   storage modules and the CLI measured at 100% branch-inclusive coverage
   alongside the rest of the pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ ChromaDB query path, document registry and a CLI index command (Stages 25–29)
+- ⬜ File storage and a CLI index command (Stages 26–29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
 - ⬜ Grounded answer generation with citations (Stages 37–44)
 - ⬜ Evaluation metrics and configuration experiments (Stages 45–52)

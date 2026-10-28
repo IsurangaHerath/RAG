@@ -92,7 +92,7 @@ RAG/
 │   │   └── generation.py    # Stage 22: chunks → aligned vectors (embed step)
 │   ├── storage/             # Stages 24–27
 │   │   ├── chroma.py        # Stage 24: VectorIndex write path over persistent Chroma
-│   │   └── registry.py      # DocumentRegistry (status, checksum)
+│   │   └── registry.py      # Stage 25: DocumentRegistry (status, checksum) over SQLite
 │   ├── retrieval/           # Stages 30–35
 │   │   ├── retriever.py     # top-k semantic search
 │   │   ├── scoring.py       # distance → score conversion (justified)
@@ -834,10 +834,18 @@ class VectorIndex(Protocol):
 
 class DocumentRegistry(Protocol):
     def create(self, doc: Document) -> None: ...
+        # implemented Stage 25 (§5.3.2) — replaces rather than rejects, so a
+        # finished or failed document can restart at pending as a fresh record
     def get(self, doc_id: str) -> DocumentRecord | None: ...
+        # DocumentRecord is a type alias for Document (§5.3.2): status, error
+        # and content_sha256 are already §5.1 fields
     def list(self, *, status: IngestStatus | None, limit: int, offset: int) -> list[DocumentRecord]: ...
+        # implemented Stage 25 (§5.3.2) — limit/offset defaulted, ordered by doc_id
     def update_status(self, doc_id: str, status: IngestStatus, error: str | None = None) -> None: ...
+        # implemented Stage 25 (§5.3.2) — transitions delegated to
+        # Document.with_status (§5.1); raises NotFoundError for unknown ids
     def find_by_hash(self, sha256: str) -> DocumentRecord | None: ...   # dedup
+        # implemented Stage 25 (§5.3.2) — indexed, deterministic "first" = lowest doc_id
 
 class FileStore(Protocol):
     def save(self, stream: BinaryIO, *, doc_id: str) -> Path: ...
@@ -903,6 +911,67 @@ failure class wherever it is first noticed (the §5.15 rule, applied to
 a second seam). A blank collection name is rejected up front as a
 `ValidationError`, so caller mistakes get a 400-shaped error rather than
 whatever chroma might make of them.
+
+### 5.3.2 Document registry (`storage/registry.py`) — implemented in Stage 25
+
+The second of §5.3's two stores: where the *lifecycle* of a document
+lives — its status, its checksum, the record itself. Everything that
+has been waiting on a registry now has a home. §5.2.2's service noted
+it "runs before any registry exists"; §5.16's pipeline kept an
+in-memory list named after this Protocol precisely so this stage could
+replace it; and §5.1's status graph finally has something to apply it
+to.
+
+**SQLite, from the standard library.** No new dependency, one ordinary
+file next to the rest of the configured data, and every test runs
+against a temporary directory with no server to start. What §5.3
+promises is the Protocol, not the engine — SQLite → Postgres stays a
+swap of implementation, and the SQL is deliberately uninteresting:
+one table, two indexes (on the checksum and the status), `?`
+placeholders, nothing interpolated.
+
+**The model owns the rules; the registry owns the rows.** Every status
+change goes through `Document.with_status` (§5.1), so the transition
+graph, the "`failed` must carry an error" rule and the `ingested_at`
+stamp are enforced in exactly one place — the registry adds only the
+two things the model *cannot* know: `NotFoundError` for an id it never
+stored, and persistence of the result. A registry that re-implemented
+the graph would be a second copy waiting to drift from the first.
+
+**`create` replaces rather than rejects.** §5.1 makes terminal states
+permanent on a *record*, with the documented remedy that "a finished
+document must be re-ingested (a fresh record)". `create` is that fresh
+record: re-registering a `doc_id` overwrites every column and returns
+the document to `pending`, which is what lets an edited file — or a
+retry after a crash — start over instead of being stuck at `indexed`
+or `failed`. §6.1's 409 for a duplicate upload is decided earlier, by
+§5.2.6's deduplication, never reaching this method.
+
+**`DocumentRecord` is a name, not a second type.** The sketch's return
+type is a `type` alias for `Document`, because status, error and
+`content_sha256` — everything a registry manages — are already fields
+of §5.1's model; a parallel record class would be a second source of
+truth for the same twelve columns. Full text is stored as well, so a
+round-trip is exact: every other component hands out complete
+`Document` objects, and a registry returning hollowed-out copies would
+be a different kind of thing everywhere it was used.
+
+**Determinism, everywhere.** Every query orders by `doc_id` — unique
+and stable, so paging never skips or repeats a row. `find_by_hash` is
+the indexed counterpart of §5.2.6's sequence scan, same name and
+contract on purpose: "first" is the lowest `doc_id`, so one hash
+backing several paths (a renamed copy) always resolves to the same
+document. Negative `limit`/`offset` are rejected before sqlite can
+read `LIMIT -1` as *unbounded*.
+
+**Proven by reopening the file.** Tests round-trip a document through
+SQLite and back to a `==`-equal model instance, walk the full
+lifecycle, assert terminal states refuse further moves, restart a
+finished record with a fresh `create`, page and filter listings, and
+translate an unopenable path into `DependencyError`. The closing test
+seeds an `IngestPipeline` from `registry.list()`: an unchanged file is
+skipped with zero embeds and zero store operations — §5.16's stand-in
+list, now supplied by the real thing.
 
 ### 5.4 Retrieval
 
