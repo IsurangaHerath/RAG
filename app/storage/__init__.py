@@ -1,1 +1,1 @@
-"""Persistent vector storage (ChromaDB) and the document registry."""
+"""Persistent vector storage (ChromaDB), the document registry and the file store."""

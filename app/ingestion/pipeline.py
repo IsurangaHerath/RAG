@@ -53,13 +53,14 @@ doubles every retrieval hit. A caller that knows a second path is a
 deliberate independent copy can pass ``renamed_policy="ingest"``.
 
 Deviations from §5.2's sketch, stated outright: ``run`` takes a filesystem
-path plus an explicit ``source_path`` rather than only ``doc_id`` — there is
-no ``FileStore`` yet to resolve ids to files — and its result is named
+path plus an explicit ``source_path`` rather than only ``doc_id`` — the
+caller is the one holding the file (a corpus path in tests, the file
+store's ``path_for(doc_id)`` for an upload) — and its result is named
 ``DocumentIngestResult`` because service.py already owns ``IngestResult``
 for the batch report. Document *status* is left at ``PENDING``: lifecycle
-transitions belong to the registry that does not exist yet, which is also
-why this module's outcomes are its own vocabulary rather than
-:class:`~app.domain.models.IngestStatus`.
+transitions belong to the registry (§5.3.2), applied by whoever drives
+it, which is also why this module's outcomes are its own vocabulary
+rather than :class:`~app.domain.models.IngestStatus`.
 """
 
 from __future__ import annotations

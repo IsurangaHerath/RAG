@@ -26,7 +26,7 @@ REQUIRED_PACKAGES: dict[str, str] = {
     "app.ingestion": "file discovery, loaders, metadata, dedup, reporting",
     "app.preprocessing": "chunking",
     "app.embeddings": "embedding interface and OpenAI adapter",
-    "app.storage": "ChromaDB vector store and document registry",
+    "app.storage": "ChromaDB vector store, document registry and file store",
     "app.retrieval": "semantic retrieval",
     "app.generation": "prompting and LLM answer generation",
     "app.evaluation": "metrics and experiment runners",

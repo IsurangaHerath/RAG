@@ -92,7 +92,8 @@ RAG/
 │   │   └── generation.py    # Stage 22: chunks → aligned vectors (embed step)
 │   ├── storage/             # Stages 24–27
 │   │   ├── chroma.py        # Stage 24: VectorIndex write path over persistent Chroma
-│   │   └── registry.py      # Stage 25: DocumentRegistry (status, checksum) over SQLite
+│   │   ├── registry.py      # Stage 25: DocumentRegistry (status, checksum) over SQLite
+│   │   └── file_store.py    # Stage 26: FileStore (save/path_for) for stored source files
 │   ├── retrieval/           # Stages 30–35
 │   │   ├── retriever.py     # top-k semantic search
 │   │   ├── scoring.py       # distance → score conversion (justified)
@@ -267,10 +268,11 @@ class Embedder(Protocol):
 class IngestPipeline(Protocol):
     def run(self, doc_id: str) -> IngestResult: ...
         # load → chunk → embed → upsert → registry.update_status(INDEXED | FAILED)
-        # implemented Stage 23 (§5.16): run(path, source_path=...) — no FileStore
-        # exists to resolve ids to files yet; the result is DocumentIngestResult
-        # (IngestResult is §5.2.7's batch report), and update_status waits for
-        # the registry (Stages 24–27), which closes the delete→upsert window
+        # implemented Stage 23 (§5.16): run(path, source_path=...) — the
+        # caller locates the file (§5.3.3's FileStore does for an upload);
+        # the result is DocumentIngestResult (IngestResult is §5.2.7's
+        # batch report), and update_status still belongs to whoever drives
+        # the registry (§5.3.2), which closes the delete→upsert window
 ```
 
 ### 5.2.1 Discovery (`ingestion/discovery.py`) — implemented in Stage 10
@@ -816,7 +818,7 @@ here.
 
 ### 5.3 Storage
 
-Responsibility: persistence + retrieval of vectors; lifecycle state of documents. Two independent stores behind interfaces so they can be swapped (Chroma → pgvector; SQLite → Postgres).
+Responsibility: persistence + retrieval of vectors; lifecycle state of documents; storage of the uploaded source files. Two database-backed stores behind interfaces so they can be swapped (Chroma → pgvector; SQLite → Postgres), plus a plain file store over the data directory (§5.3.3).
 
 ```python
 class VectorIndex(Protocol):
@@ -849,20 +851,25 @@ class DocumentRegistry(Protocol):
 
 class FileStore(Protocol):
     def save(self, stream: BinaryIO, *, doc_id: str) -> Path: ...
+        # implemented Stage 26 (§5.3.3) — atomic replace; validates doc_id
+        # before any I/O so a crafted id cannot escape the uploads directory
     def path_for(self, doc_id: str) -> Path: ...
+        # implemented Stage 26 (§5.3.3) — pure, no I/O: computes where the
+        # file would be; the opener of the path reports a missing one
 ```
 
 `DocumentRegistry.find_by_hash` is the indexed counterpart of
-`app.ingestion.deduplication.find_by_hash` (§5.2.6), which today scans a
-plain sequence for the same reason everything else here is unimplemented:
-the storage for it does not exist yet. Same name, same contract, so the swap
-is a change of where the lookup runs, not of what it means.
+`app.ingestion.deduplication.find_by_hash` (§5.2.6), which still scans a
+plain sequence: the storage behind the indexed lookup has existed since
+Stage 25 (§5.3.2), but nothing wires the scan to it yet. Same name, same
+contract, so the swap is a change of where the lookup runs, not of what
+it means.
 
 Chroma specifics: single persistent collection `techdocs` (HNSW, cosine), `persist_directory` on a Docker volume in single-node mode or Chroma server mode if the api/worker split needs a network share. Metadata schema: `doc_id, chunk_id, filename, page, section, media_type, ingested_at`.
 
 ### 5.3.1 Chroma index write path (`storage/chroma.py`) — implemented in Stage 24
 
-The first of §5.3's two stores, and the write half of its
+The first of §5.3's stores, and the write half of its
 `VectorIndex` contract: `upsert`, `delete_document` and `count` over a
 persistent collection — precisely the three methods
 `IngestPipeline` (§5.16) needed to stop depending on its in-memory
@@ -914,7 +921,7 @@ whatever chroma might make of them.
 
 ### 5.3.2 Document registry (`storage/registry.py`) — implemented in Stage 25
 
-The second of §5.3's two stores: where the *lifecycle* of a document
+The second of §5.3's stores: where the *lifecycle* of a document
 lives — its status, its checksum, the record itself. Everything that
 has been waiting on a registry now has a home. §5.2.2's service noted
 it "runs before any registry exists"; §5.16's pipeline kept an
@@ -972,6 +979,59 @@ translate an unopenable path into `DependencyError`. The closing test
 seeds an `IngestPipeline` from `registry.list()`: an unchanged file is
 skipped with zero embeds and zero store operations — §5.16's stand-in
 list, now supplied by the real thing.
+
+### 5.3.3 File store (`storage/file_store.py`) — implemented in Stage 26
+
+The third of §5.3's stores — and the one everything else has
+been talking around: *where is the file?* The ingest service records a
+`source_path`, the pipeline opens whatever path it is handed, and
+§6.1's worker carries nothing but a `doc_id` — somebody has to turn
+that id back into bytes. `FileStore` is that somebody, in two methods:
+`save` writes a stream, `path_for` says where it went.
+
+**§6.1's layout, taken literally.** Files live at
+`data/uploads/{doc_id}/original`, one directory per document as the
+sequence diagram draws it, with a fixed name inside because `save`
+receives only bytes and an id — the original *filename* belongs to
+§5.1's record, which the registry holds, not to the store. The
+directory leaves room for whatever later sits beside a source
+(extracted text, thumbnails) without a layout change. The `uploads`
+root comes from `Settings.data_dir`, so pointing `DATA_DIR`
+somewhere else moves uploads along with everything else.
+
+**No extension, so the media type travels with the task.** A stored
+file has nothing to infer a type from, deliberately: bytes are opaque
+here. §6.1's api decides the type while it validates the upload and
+hands `media_type` to the worker next to the `doc_id`; a caller that
+omits it falls back to `text/plain` — right for text and wrong for a
+PDF. The store refuses to guess; guessing is how a PDF gets read as
+plain text.
+
+**An id becomes a path, so the id is checked first.** `doc_id` is
+validated as §5.1's format — `doc_` plus 16 lowercase hex, exactly
+what `make_doc_id` mints — *before* any path is built or any
+directory created. `..`, separators and drive letters cannot reach
+outside the uploads directory, and a rejected id costs no I/O at all.
+`path_for` itself is pure: asking about an unknown id computes a
+path and creates nothing, and the component that opens the path
+reports the absence (`file_not_found`) rather than the lookup.
+
+**Writes replace atomically.** Re-uploading overwrites (§5.2's
+"re-upload overwrites rather than duplicates"): bytes go to a
+`.part` sibling and are moved into place with `os.replace`, so a
+reader sees the old file or the new one and never a half-written one.
+A failed write deletes its own staging file and leaves the previous
+good copy untouched; OS-level trouble arrives as `DependencyError`,
+same policy as §5.3.1 and §5.3.2.
+
+**Proven by failing, not just by writing.** Tests round-trip binary
+payloads byte-for-byte, overwrite without leaving debris, reject a
+parametrised gallery of malformed ids with zero I/O, translate a
+blocked root and a stream that dies mid-copy into `DependencyError`
+(with the old file surviving), and — the hand-off this stage exists
+for — save bytes and feed `path_for`'s result straight into the real
+ingest pipeline, which chunks them into the store in
+`delete`-then-`upsert` order.
 
 ### 5.4 Retrieval
 
@@ -1542,14 +1602,15 @@ deliberate independent copy passes `renamed_policy="ingest"` instead.
 
 **Deviations from §5.2's sketch, stated outright.** `run` takes a
 filesystem path plus an explicit `source_path` rather than only `doc_id`,
-because no `FileStore` exists yet to resolve ids to files (the explicit
+because the caller is the one holding the file — a corpus path in tests,
+§5.3.3's `FileStore.path_for(doc_id)` for an upload (the explicit
 identity also stops a machine-specific absolute path from silently
 becoming an id — `make_doc_id` rejects those *before* the file is
 opened). Its result is `DocumentIngestResult` because §5.2.7's service
 already owns `IngestResult`. Document *status* stays `PENDING`:
-lifecycle transitions belong to the registry that does not exist yet,
-which is also why outcomes use this module's own vocabulary rather than
-`IngestStatus`.
+lifecycle transitions belong to the registry (§5.3.2), applied by
+whoever drives it, which is also why outcomes use this module's own
+vocabulary rather than `IngestStatus`.
 
 **Proven by running twice.** The tests ingest a real corpus file and
 then re-ingest it: the second run is a skip with the store's operation
