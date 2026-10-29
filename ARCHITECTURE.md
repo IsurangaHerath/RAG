@@ -1033,6 +1033,40 @@ for — save bytes and feed `path_for`'s result straight into the real
 ingest pipeline, which chunks them into the store in
 `delete`-then-`upsert` order.
 
+### 5.3.4 Storage contract tests (`tests/unit/test_storage_contract.py`) — implemented in Stage 27
+
+The contract half of the storage vertical slice (§13, step 2), closing
+out §8's testing row — *each `Protocol` implementation conforms* — with a
+suite of its own.
+
+**Three registries, one set of rules.** The contract tests run against
+every implementation registered in `STORAGE_VECTOR_INDEXES`,
+`STORAGE_DOCUMENT_REGISTRIES` and `STORAGE_FILE_STORES`: the Chroma
+write path, the SQLite document registry and the local-disk file store
+today, each joined later by adding one factory to its registry, and the
+rules below running for the newcomer automatically.
+
+The vector contract pinned here is the **write half** for now — `upsert`,
+`delete_document` and `count`; the read half (`similarity_search` with its
+`MetadataFilter`, returning `RetrievedChunk`) lands with retrieval
+(§5.4) and joins this suite then.
+
+**Cross-store legs close the loop.** The behaviour worth proving is not
+any single store but the hand-offs between them (§6.1): an upload saved by
+the file store is ingested through the real pipeline into the real vector
+index, and the registry is the state that ties the two together — the
+status a worker is expected to move, and the dedup counterpart a content
+hash lookup reaches. Two legs are proven:
+
+* **Happy path** — save → ingest (`created`) → index holds the chunks →
+  registry marked `INDEXED` → `find_by_hash` resolves → re-ingest is a
+  skip.
+* **Failure isolation** — a refused embed leaves no chunks in the index,
+  keeps the registry un-advanced and the stored file intact.
+
+Both legs run against real storage (temporary Chroma directory, temporary
+registry file, temporary uploads root) with the offline embedder double.
+
 ### 5.4 Retrieval
 
 Responsibility: fetch the *smallest sufficient* evidence set within the model's context budget.
