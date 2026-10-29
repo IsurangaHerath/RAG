@@ -1,33 +1,44 @@
 """Command-line entry points for the ingestion pipeline.
 
-Two commands, because they are the two things a person needs before the
-later stages exist:
+Three commands, because they are the three things a person needs before
+the later stages exist:
 
 ``prepare``
     Write the sample corpus into the configured samples directory. This is
     what turns a fresh clone into something the pipeline can read, which is
-    why ``ingest`` defaults to that same directory.
+    why ``ingest`` and ``index`` default to that same directory.
 
 ``ingest``
     Run discovery, loading and metadata over a directory and print the
     report the reporting stage already knows how to build. The wall time
     measured here is the report's real duration, not an estimate.
 
+``index``
+    Actually write a directory into the vector store: build the embedder,
+    the Chroma collection and the document registry from settings, run the
+    batch indexing pass over the directory, and print its report. This is
+    the first command whose happy path needs an OpenAI key — without one it
+    stops *before* touching any storage, with the configuration error's own
+    message instead of a half-written index.
+
 Usage::
 
     python -m scripts.cli prepare [--dest PATH] [--force] [--format text|json]
     python -m scripts.cli ingest [PATH] [--no-recursive] [--format text|json]
+    python -m scripts.cli index [PATH] [--no-recursive] [--format text|json]
 
 Exit statuses
 ------------
 0
     The command ran and no file failed.
 1
-    The command could not run: a missing directory, an unreadable one.
+    The command could not run: a missing directory, an unreadable one,
+    a missing API key.
 2
     argparse rejected the arguments (its own convention, not ours).
 3
-    The command ran and produced a report, but some files failed to load.
+    The command ran and produced a report, but some files failed — to load
+    for ``ingest``, to reach the index for ``index``.
 
 The distinction between 1 and 3 is the same one the pipeline keeps
 everywhere else — "your invocation is wrong" and "your data is wrong" are
@@ -50,9 +61,13 @@ from pathlib import Path
 
 from app.config import Settings, get_settings
 from app.domain.errors import RAGError
-from app.ingestion.reporting import build_report
+from app.embeddings.openai_embedder import OpenAIEmbedder
+from app.ingestion.indexer import index_directory
+from app.ingestion.reporting import build_index_report, build_report
 from app.ingestion.service import ingest
 from app.observability.logging import configure_from_settings, get_logger
+from app.storage.chroma import ChromaIndex
+from app.storage.registry import REGISTRY_FILENAME, DocumentRegistry
 from scripts.samples import prepare
 
 __all__ = [
@@ -87,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="python -m scripts.cli",
-        description="Ingest technical documents and report on what happened.",
+        description="Prepare, ingest and index technical documents, reporting on what happened.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -128,6 +143,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="read only the files directly inside PATH, not its sub-directories",
     )
 
+    index_parser = commands.add_parser(
+        "index",
+        parents=[output],
+        help="index every supported file under a directory into the vector store",
+    )
+    index_parser.add_argument(
+        "path",
+        type=Path,
+        nargs="?",
+        default=None,
+        metavar="PATH",
+        help="directory to index (default: the configured samples directory)",
+    )
+    index_parser.add_argument(
+        "--no-recursive",
+        action="store_true",
+        help="index only the files directly inside PATH, not its sub-directories",
+    )
+
     return parser
 
 
@@ -163,6 +197,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "prepare":
             return _run_prepare(args, settings)
+        if args.command == "index":
+            return _run_index(args, settings)
         return _run_ingest(args, settings)
     except RAGError as exc:
         # Deliberate failure: a message and a code, never a traceback. The
@@ -193,13 +229,7 @@ def _run_ingest(args: argparse.Namespace, settings: Settings) -> int:
     root = settings.sample_docs_dir if args.path is None else args.path
 
     if args.path is None and not root.exists():
-        # The default is the sample corpus, which a fresh clone does not
-        # have yet. Saying what to run beats a bare "does not exist".
-        print(
-            f"error: {root.name} does not exist yet\n"
-            "  hint: run `python -m scripts.cli prepare` to write the sample corpus",
-            file=sys.stderr,
-        )
+        _warn_missing_default(root)
         return EXIT_DID_NOT_RUN
 
     started = time.perf_counter()
@@ -226,6 +256,63 @@ def _run_ingest(args: argparse.Namespace, settings: Settings) -> int:
     )
 
     return EXIT_FILES_FAILED if report.has_failures else EXIT_OK
+
+
+def _run_index(args: argparse.Namespace, settings: Settings) -> int:
+    """Write a directory into the vector store and print its index report."""
+    root = settings.sample_docs_dir if args.path is None else args.path
+
+    if args.path is None and not root.exists():
+        _warn_missing_default(root)
+        return EXIT_DID_NOT_RUN
+
+    # The embedder is built first, before any storage is opened: a missing
+    # key is a configuration error the user has to fix, and it should not
+    # cost a Chroma collection or a registry file to discover that.
+    embedder = OpenAIEmbedder.from_settings(settings)
+    store = ChromaIndex(persist_directory=settings.chroma_persist_dir)
+    registry = DocumentRegistry(path=settings.data_dir / REGISTRY_FILENAME)
+
+    started = time.perf_counter()
+    result = index_directory(
+        root,
+        embedder=embedder,
+        store=store,
+        registry=registry,
+        recursive=not args.no_recursive,
+    )
+    elapsed = time.perf_counter() - started
+
+    report = build_index_report(result, duration_seconds=elapsed)
+
+    if args.format == "json":
+        print(report.to_json())
+    else:
+        print(report.render())
+
+    get_logger(__name__).debug(
+        "index.finished",
+        root=str(root),
+        created=result.created_count,
+        replaced=result.replaced_count,
+        skipped=result.skipped_count,
+        failed=result.failed_count,
+        chunks_written=result.chunks_written,
+        duration_seconds=elapsed,
+    )
+
+    return EXIT_FILES_FAILED if report.has_failures else EXIT_OK
+
+
+def _warn_missing_default(root: Path) -> None:
+    """Explain, on stderr, that the default corpus has not been written yet."""
+    # The default is the sample corpus, which a fresh clone does not have
+    # yet. Saying what to run beats a bare "does not exist".
+    print(
+        f"error: {root.name} does not exist yet\n"
+        "  hint: run `python -m scripts.cli prepare` to write the sample corpus",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - the interpreter's entry point

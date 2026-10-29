@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1-28 of a 60-stage plan are
+> **Status: early-stage foundation.** Stages 1-29 of a 60-stage plan are
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
 > the embedding layer (contract, OpenAI adapter, batching and bounded
@@ -74,7 +74,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 ## Project status
 
-**Implemented and tested (Stages 1-28):**
+**Implemented and tested (Stages 1-29):**
 
 - ✅ Requirements analysis and modular architecture (`ARCHITECTURE.md`)
 - ✅ Git repository with a clean, ignored working tree
@@ -109,9 +109,9 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 - ✅ A sample corpus generated on demand, byte-identical on every run, split
   into readable documents and files that deliberately fail — so one command
   demonstrates loaded, skipped, failed and unsupported results together
-- ✅ Command-line entry points (`python -m scripts.cli prepare|ingest`) that
-  print the report as text or JSON and tell invocation failures (status 1)
-  apart from files that failed to load (status 3)
+- ✅ Command-line entry points (`python -m scripts.cli prepare|ingest|index`)
+  that print the report as text or JSON and tell invocation failures
+  (status 1) apart from files that failed (status 3)
 - ✅ Chunking: loaded documents split into overlapping chunks by LangChain's
   recursive character splitter, each stamped with a stable `doc_id:index` id
   and carrying the `page` (PDF) or `section` (Markdown heading) it came from,
@@ -185,13 +185,19 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   unchanged, and one broken file — unreadable, provider down, registry
   refusing — isolated to its own reported outcome while the batch carries
   on
-- ✅ **946 tests passing**, with the chunking, embedding, pipeline and
+- ✅ The `index` command: it builds the embedder, the Chroma collection
+  and the document registry from settings, runs that pass over a
+  directory, and prints the index report — created, replaced, skipped and
+  failed with their codes, plus chunks written and the dedup tallies — as
+  text or JSON; a missing `OPENAI_API_KEY` stops it before any storage is
+  opened, with the configuration error's own message instead of a
+  half-written index
+- ✅ **974 tests passing**, with the chunking, embedding, pipeline and
   storage modules and the CLI measured at 100% branch-inclusive coverage
   alongside the rest of the pipeline modules
 
 **Planned — not yet implemented:**
 
-- ⬜ CLI index command (Stage 29)
 - ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
 - ⬜ Grounded answer generation with citations (Stages 37–44)
 - ⬜ Evaluation metrics and configuration experiments (Stages 45–52)

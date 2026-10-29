@@ -17,8 +17,12 @@ import pytest
 import structlog
 
 from app.config import Settings
+from app.domain.models import IngestStatus
+from app.storage.chroma import ChromaIndex
+from app.storage.registry import REGISTRY_FILENAME, DocumentRegistry
 from scripts import cli
 from scripts.samples import prepare
+from tests.fakes import FakeEmbedder
 
 
 @pytest.fixture(autouse=True)
@@ -270,17 +274,228 @@ def test_no_recursive_reads_only_the_top_level(
 
 
 # ---------------------------------------------------------------------------
+# index
+# ---------------------------------------------------------------------------
+class OfflineEmbedderSource:
+    """Stands in for ``OpenAIEmbedder`` so ``index`` never reaches a network.
+
+    Same shape as the real class — a ``from_settings`` entry point — because
+    that is the seam the command builds its embedder through.
+    """
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> FakeEmbedder:
+        return FakeEmbedder()
+
+
+@pytest.fixture
+def offline_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """Settings rooted in a temporary data directory, embedder stubbed out."""
+    settings = Settings(_env_file=None, data_dir=tmp_path / "data")
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(cli, "OpenAIEmbedder", OfflineEmbedderSource)
+    return settings
+
+
+@pytest.fixture
+def docs(tmp_path: Path) -> Path:
+    """A one-file directory to index."""
+    root = tmp_path / "docs"
+    root.mkdir()
+    (root / "guide.md").write_text("# Guide\nPayments settle in a day.\n", encoding="utf-8")
+    return root
+
+
+def test_index_writes_chunks_and_a_terminal_row(
+    offline_settings: Settings, docs: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The happy path: file becomes chunks, its row ends INDEXED, exit 0."""
+    status = cli.main(["index", str(docs)])
+
+    printed = capsys.readouterr().out
+    assert status == cli.EXIT_OK
+    assert "Index report: docs" in printed
+    assert "created      1" in printed
+
+    registry = DocumentRegistry(path=offline_settings.data_dir / REGISTRY_FILENAME)
+    rows = registry.list(limit=10)
+    registry.close()
+    assert len(rows) == 1
+    assert rows[0].status is IngestStatus.INDEXED
+    assert rows[0].ingested_at is not None
+
+    index = ChromaIndex(persist_directory=offline_settings.chroma_persist_dir)
+    assert index.count() > 0
+
+
+def test_index_json_is_pure_json_on_stdout(
+    offline_settings: Settings, docs: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """stdout carries the report and nothing else, for a script to read."""
+    status = cli.main(["index", str(docs), "--format", "json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert status == cli.EXIT_OK
+    assert payload["root"] == "docs"
+    assert payload["created"] == 1
+    assert payload["chunks_written"] > 0
+    assert payload["failed"] == 0
+    assert payload["failures"] == []
+    assert payload["duration_seconds"] >= 0
+
+
+def test_index_second_run_is_free(
+    offline_settings: Settings, docs: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Re-running indexes nothing and says so — the pass is idempotent."""
+    cli.main(["index", str(docs)])
+    capsys.readouterr()
+
+    status = cli.main(["index", str(docs), "--format", "json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert status == cli.EXIT_OK
+    assert payload["created"] == 0
+    assert payload["skipped"] == 1
+    assert payload["chunks_written"] == 0
+    assert dict(payload["dedup"])["unchanged"] == 1
+
+
+def test_index_over_the_sample_corpus_exits_three_because_files_failed(
+    offline_settings: Settings, corpus: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The report still prints, with the codes that explain the status."""
+    status = cli.main(["index", str(corpus)])
+
+    printed = capsys.readouterr().out
+    assert status == cli.EXIT_FILES_FAILED
+    assert f"Index report: {corpus.name}" in printed
+    assert "failed by code" in printed
+    assert "pdf_encrypted" in printed
+    assert "binary_content" in printed
+
+
+def test_index_prints_the_directory_name_not_the_absolute_path(
+    offline_settings: Settings, docs: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same rule as every other report: a full path never escapes."""
+    cli.main(["index", str(docs)])
+
+    printed = capsys.readouterr().out
+    assert str(docs) not in printed
+    assert docs.name in printed
+
+
+def test_index_without_an_api_key_stops_before_touching_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A missing key is a configuration error — and no storage is opened.
+
+    The embedder is built first on purpose: discovering the key is missing
+    must not cost a Chroma collection or a registry file.
+    """
+    monkeypatch.setattr(
+        cli,
+        "get_settings",
+        lambda: Settings(_env_file=None, openai_api_key=None, data_dir=tmp_path / "data"),
+    )
+    root = tmp_path / "docs"
+    root.mkdir()
+    (root / "guide.md").write_text("# Guide", encoding="utf-8")
+
+    status = cli.main(["index", str(root)])
+
+    errors = capsys.readouterr().err
+    assert status == cli.EXIT_DID_NOT_RUN
+    assert "OPENAI_API_KEY" in errors
+    assert "configuration_error" in errors
+    assert "Traceback" not in errors
+    assert not (tmp_path / "data").exists()
+
+
+def test_index_default_path_is_the_configured_samples_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Called with no path, the command indexes the sample corpus."""
+    destination = tmp_path / "my-samples"
+    prepare(destination)
+    monkeypatch.setattr(
+        cli,
+        "get_settings",
+        lambda: Settings(
+            _env_file=None,
+            data_dir=tmp_path / "data",
+            sample_docs_dir=destination,
+        ),
+    )
+    monkeypatch.setattr(cli, "OpenAIEmbedder", OfflineEmbedderSource)
+
+    status = cli.main(["index"])
+
+    assert status == cli.EXIT_FILES_FAILED  # the samples include failures
+    assert "my-samples" in capsys.readouterr().out
+
+
+def test_index_without_samples_tells_you_how_to_make_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The default-path check runs before anything else, embedder included."""
+    monkeypatch.setattr(
+        cli,
+        "get_settings",
+        lambda: Settings(
+            _env_file=None,
+            data_dir=tmp_path / "data",
+            sample_docs_dir=tmp_path / "not-there",
+        ),
+    )
+
+    status = cli.main(["index"])
+
+    errors = capsys.readouterr().err
+    assert status == cli.EXIT_DID_NOT_RUN
+    assert "scripts.cli prepare" in errors
+    assert "Traceback" not in errors
+
+
+def test_index_no_recursive_reaches_discovery(
+    offline_settings: Settings, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The flag changes what gets written, not just what is reported."""
+    root = tmp_path / "docs"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    (root / "one.txt").write_text("alpha", encoding="utf-8")
+    (nested / "two.txt").write_text("beta", encoding="utf-8")
+
+    cli.main(["index", str(root), "--no-recursive", "--format", "json"])
+    flat = json.loads(capsys.readouterr().out)
+
+    cli.main(["index", str(root), "--format", "json"])
+    recursive = json.loads(capsys.readouterr().out)
+
+    assert flat["total_files"] == 1
+    assert flat["created"] == 1
+    assert recursive["total_files"] == 2
+    assert recursive["created"] == 1  # only the nested file is new
+    assert recursive["skipped"] == 1  # the top-level one is unchanged
+
+
+# ---------------------------------------------------------------------------
 # The command surface itself
 # ---------------------------------------------------------------------------
-def test_parser_accepts_both_commands_and_their_flags() -> None:
-    """Both commands exist, and the shared flags reach each of them."""
+def test_parser_accepts_every_command_and_their_flags() -> None:
+    """All three commands exist, and the shared flags reach each of them."""
     parser = cli.build_parser()
 
     assert parser.parse_args(["prepare"]).command == "prepare"
     assert parser.parse_args(["ingest"]).command == "ingest"
+    assert parser.parse_args(["index"]).command == "index"
     assert parser.parse_args(["prepare"]).format == "text"
     assert parser.parse_args(["prepare", "--format", "json"]).format == "json"
     assert parser.parse_args(["ingest", "--no-recursive"]).no_recursive is True
+    assert parser.parse_args(["index", "--no-recursive"]).no_recursive is True
+    assert parser.parse_args(["index", "--format", "json"]).format == "json"
 
 
 def test_usage_errors_are_argparses_own_exit_status() -> None:

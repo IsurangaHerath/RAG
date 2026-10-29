@@ -1265,6 +1265,20 @@ redaction applies to the CLI exactly as it does to the API (§5.9), but the
 happy path emits nothing above `DEBUG`: a tool that annotates its own
 successful run is noise.
 
+**The third command wires the storage slice together.** `index` takes the
+same `PATH`, `--no-recursive` and `--format` as `ingest`, builds the
+embedder from settings, opens §5.3.1's Chroma collection at the configured
+persist directory and §5.3.2's registry under the configured data
+directory, runs §5.17's pass over the directory, and prints §5.2.7's index
+report. The embedder is built *first*, before any storage is opened: a
+missing `OPENAI_API_KEY` is a configuration error the user must fix, and
+discovering it should not cost a collection or a registry file. Exit
+statuses are the ones above with `3` re-read for the pass: the command ran
+and the report printed, but some files did not reach the index — which the
+report's `failed by code` section then explains, grouping a post-load
+failure (provider, registry) under the pipeline's code rather than the
+load's.
+
 **Where the PDF builders live.** `scripts/pdf_fixtures.py` holds them, and
 `tests/unit/pdf_fixtures.py` re-exports them unchanged — so the three test
 files importing the fixture needed no edits. Two consumers need the same
@@ -1280,10 +1294,10 @@ toward tooling.
 would be exactly the drift the structural and dependency guards exist to
 prevent.
 
-**Not implemented:** no `index` command (that arrives with the vector
-store), no deduplication tallies in the printed report — `build_report`
-already accepts `decisions`, but there is no registry to compare against
-yet — and no file watching; `prepare` is run by hand.
+**Not implemented:** no deduplication tallies in the *ingest* report —
+`build_report` already accepts `decisions`, but the `ingest` command has
+no registry to compare against, and the pass that does (§5.17) reports its
+own tallies instead — and no file watching; `prepare` is run by hand.
 
 ### 5.11 Chunking (`preprocessing/chunking.py`) — implemented in Stage 18
 
@@ -1662,7 +1676,7 @@ never document text.
 §5.16's `IngestPipeline` indexes *one* document when someone hands it a
 file. Nothing yet walked a whole directory, owned the registry row a
 document is supposed to have while work is happening (§6.1), and reported
-on the batch — which is exactly what the upcoming `index` command needs.
+on the batch — which is what the `index` command (§5.10) needs.
 `index_directory(root, *, embedder, store, registry, chunker=None,
 recursive=True)` is that pass: **discover → load → classify → register the
 row → `pipeline.run()` → mark INDEXED or FAILED**, once per supported file,

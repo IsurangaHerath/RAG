@@ -17,6 +17,12 @@ So this module **derives** from ``IngestResult``; it never re-reads a file
 and never becomes a second source of truth. Rebuilding it after every change
 to a batch costs nothing and removes the question of which copy is current.
 
+The same reasoning produces a second, smaller artefact: the **index
+report**, derived from §5.17's ``IndexResult``. Its counts answer a write
+pass's question — created, replaced, chunks written — while its groupings
+come from exactly the same ``CodeTally`` buckets, so a reader who learned
+the ingest report reads this one without a legend.
+
 What it adds beyond the counts
 ------------------------------
 
@@ -44,12 +50,15 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from app.ingestion.deduplication import ChangeKind, DedupDecision
+from app.ingestion.indexer import IndexOutcome, IndexResult
 from app.ingestion.service import FileResult, IngestResult
 
 __all__ = [
     "UNSPECIFIED_CODE",
     "CodeTally",
+    "IndexReport",
     "IngestReport",
+    "build_index_report",
     "build_report",
     "format_bytes",
 ]
@@ -195,41 +204,138 @@ class IngestReport:
             f" | {self.processed_files} attempted"
             f" | {self.indexable} ready to index"
         )
-        detail: list[str] = []
-        if self.total_bytes is not None:
-            detail.append(f"{format_bytes(self.total_bytes)} read")
-        else:
-            detail.append("size unknown")
-        if self.duration_seconds is not None:
-            detail.append(f"{self.duration_seconds:.2f}s")
-        header.append("  " + " | ".join(detail))
+        header.append(_detail_line(self.total_bytes, self.duration_seconds))
 
-        rows = (
-            ("loaded", self.loaded),
-            ("skipped", self.skipped),
-            ("failed", self.failed),
-            ("unsupported", self.unsupported),
+        body = _count_rows(
+            (
+                ("loaded", self.loaded),
+                ("skipped", self.skipped),
+                ("failed", self.failed),
+                ("unsupported", self.unsupported),
+            )
         )
-        width = max(len(label) for label, _ in rows)
-        body = [f"  {label:<{width}}  {value}" for label, value in rows]
+        body += _problem_sections(self.failures, self.skips)
+        body += _dedup_section(self.dedup)
 
-        problem_sections = (
-            ("failed by code", self.failures),
-            ("skipped by code", self.skips),
-        )
-        for title, tallies in problem_sections:
-            if not tallies:
-                continue
-            body.append("")
-            body.append(f"  {title}")
-            for tally in tallies:
-                body.append(f"    {tally.code}  x{tally.count}")
-                body.extend(f"      {path}" for path in tally.paths)
+        return "\n".join(header + body)
 
+
+@dataclass(frozen=True, slots=True)
+class IndexReport:
+    """The indexing pass reduced to the figures a report needs.
+
+    The pass of §5.17 *writes*, so its report counts writes: how many
+    documents were created, how many replaced, and how many chunks
+    actually reached the store — figures an ingest report cannot have,
+    because loading a file says nothing about the index.
+
+    Parameters
+    ----------
+    root:
+        Scanned directory's name only — never an absolute path.
+    total_files / processed_files:
+        Discovery's total (supported and unsupported together) and the
+        supported files the pass attempted.
+    created / replaced / skipped / failed / unsupported:
+        The outcome counts. ``skipped`` is the honest no-op bucket —
+        unchanged, renamed, empty — rather than a verdict on the file.
+    chunks_written:
+        Chunks that reached the store during this pass.
+    total_bytes:
+        Sum of the sizes learned, or ``None`` when no file reported one —
+        never ``0``, because "we never measured" and "there was nothing"
+        are different facts.
+    failures / skips:
+        :class:`CodeTally` groups over the *pass's* codes: a failure that
+        happened after a successful load (the provider, the registry)
+        carries the pipeline's code even though the file read fine.
+    dedup:
+        ``(kind, count)`` pairs in ``ChangeKind`` order, or ``None`` when
+        nothing in the batch reached classification.
+    duration_seconds:
+        Caller-measured wall time, or ``None`` when not supplied. Never
+        measured here — a report must not invent a number.
+    """
+
+    root: str
+    total_files: int
+    processed_files: int
+    created: int
+    replaced: int
+    skipped: int
+    failed: int
+    unsupported: int
+    chunks_written: int
+    total_bytes: int | None
+    failures: tuple[CodeTally, ...]
+    skips: tuple[CodeTally, ...]
+    dedup: tuple[tuple[str, int], ...] | None = None
+    duration_seconds: float | None = None
+
+    @property
+    def is_empty(self) -> bool:
+        """True when the scanned root held nothing the pass recognised."""
+        return self.total_files == 0
+
+    @property
+    def has_failures(self) -> bool:
+        """True when at least one file did not make it into the index."""
+        return self.failed > 0
+
+    def to_dict(self) -> dict[str, object]:
+        """JSON-safe payload: counts, groupings and provenance only."""
+        payload: dict[str, object] = {
+            "root": self.root,
+            "total_files": self.total_files,
+            "processed_files": self.processed_files,
+            "created": self.created,
+            "replaced": self.replaced,
+            "skipped": self.skipped,
+            "failed": self.failed,
+            "unsupported": self.unsupported,
+            "chunks_written": self.chunks_written,
+            "total_bytes": self.total_bytes,
+            "failures": [tally.to_dict() for tally in self.failures],
+            "skips": [tally.to_dict() for tally in self.skips],
+            "duration_seconds": self.duration_seconds,
+        }
         if self.dedup is not None:
-            body.append("")
-            body.append("  deduplication")
-            body.append("    " + ", ".join(f"{kind} {count}" for kind, count in self.dedup))
+            payload["dedup"] = dict(self.dedup)
+        return payload
+
+    def to_json(self, *, indent: int = 2) -> str:
+        """Serialise :meth:`to_dict` for writing to a report file."""
+        return json.dumps(self.to_dict(), indent=indent)
+
+    def render(self) -> str:
+        """Human-readable plain text, for a terminal or a sample report.
+
+        Same shape and rules as :meth:`IngestReport.render`: deterministic,
+        unstyled, and without a trailing newline.
+        """
+        header = [f"Index report: {self.root}"]
+        if self.is_empty:
+            header.append("  no files found")
+            return "\n".join(header)
+
+        header.append(
+            f"  {self.total_files} discovered"
+            f" | {self.processed_files} attempted"
+            f" | {self.chunks_written} chunks written"
+        )
+        header.append(_detail_line(self.total_bytes, self.duration_seconds))
+
+        body = _count_rows(
+            (
+                ("created", self.created),
+                ("replaced", self.replaced),
+                ("skipped", self.skipped),
+                ("failed", self.failed),
+                ("unsupported", self.unsupported),
+            )
+        )
+        body += _problem_sections(self.failures, self.skips)
+        body += _dedup_section(self.dedup)
 
         return "\n".join(header + body)
 
@@ -283,6 +389,54 @@ def build_report(
     )
 
 
+def build_index_report(
+    result: IndexResult,
+    *,
+    duration_seconds: float | None = None,
+) -> IndexReport:
+    """Summarise one indexing pass as an :class:`IndexReport`.
+
+    Parameters
+    ----------
+    result:
+        The pass to summarise. Nothing is re-read: every figure comes from
+        outcomes already computed.
+    duration_seconds:
+        Wall time measured by the caller. Negative values raise, since they
+        can only come from a broken clock and printing them would launder
+        the error into the report.
+
+    Returns
+    -------
+    IndexReport
+    """
+    if duration_seconds is not None and duration_seconds < 0:
+        raise ValueError(f"duration_seconds must be >= 0, got {duration_seconds}")
+
+    sizes = [outcome.file.byte_size for outcome in result.outcomes]
+    known_sizes = [size for size in sizes if size is not None]
+
+    # Failures and skips are tallied by the *outcome's* code, not the
+    # load's: a file that read perfectly and then hit a provider outage
+    # must group under the outage's code, which only the outcome carries.
+    return IndexReport(
+        root=result.root,
+        total_files=result.total_count,
+        processed_files=len(result.outcomes),
+        created=result.created_count,
+        replaced=result.replaced_count,
+        skipped=result.skipped_count,
+        failed=result.failed_count,
+        unsupported=len(result.unsupported),
+        chunks_written=result.chunks_written,
+        total_bytes=sum(known_sizes) if known_sizes else None,
+        failures=_outcome_tally([o for o in result.outcomes if o.is_failed]),
+        skips=_outcome_tally([o for o in result.outcomes if o.is_skipped]),
+        dedup=_dedup_tally(result.decisions) if result.decisions else None,
+        duration_seconds=duration_seconds,
+    )
+
+
 def format_bytes(size: int | None) -> str:
     """Render a byte count with binary units: ``1536`` -> ``"1.5 KiB"``.
 
@@ -318,11 +472,25 @@ def _tally(files: Iterable[FileResult]) -> tuple[CodeTally, ...]:
     Ties break on the code itself so two runs over the same data produce
     byte-identical reports.
     """
+    return _bucket((file_result.code, file_result.relative_path) for file_result in files)
+
+
+def _outcome_tally(outcomes: Iterable[IndexOutcome]) -> tuple[CodeTally, ...]:
+    """Bucket pass outcomes by *their* code, most frequent first.
+
+    Same ordering rules as :func:`_tally`, but reading the outcome rather
+    than the load result: the pass records failures that happened long
+    after a file loaded successfully (the provider, the registry), and
+    those codes exist nowhere else.
+    """
+    return _bucket((outcome.code, outcome.file.relative_path) for outcome in outcomes)
+
+
+def _bucket(code_and_path: Iterable[tuple[str | None, str]]) -> tuple[CodeTally, ...]:
+    """Group ``(code, path)`` pairs, most frequent first, ties by code."""
     buckets: dict[str, list[str]] = {}
-    for file_result in files:
-        buckets.setdefault(file_result.code or UNSPECIFIED_CODE, []).append(
-            file_result.relative_path
-        )
+    for code, path in code_and_path:
+        buckets.setdefault(code or UNSPECIFIED_CODE, []).append(path)
 
     tallies = [
         CodeTally(code=code, count=len(paths), paths=tuple(paths))
@@ -330,6 +498,52 @@ def _tally(files: Iterable[FileResult]) -> tuple[CodeTally, ...]:
     ]
     tallies.sort(key=lambda tally: (-tally.count, tally.code))
     return tuple(tallies)
+
+
+def _detail_line(total_bytes: int | None, duration_seconds: float | None) -> str:
+    """The "size read | duration" line both reports share."""
+    parts: list[str] = []
+    if total_bytes is not None:
+        parts.append(f"{format_bytes(total_bytes)} read")
+    else:
+        parts.append("size unknown")
+    if duration_seconds is not None:
+        parts.append(f"{duration_seconds:.2f}s")
+    return "  " + " | ".join(parts)
+
+
+def _count_rows(rows: Sequence[tuple[str, int]]) -> list[str]:
+    """Render ``(label, value)`` pairs with aligned labels."""
+    width = max(len(label) for label, _ in rows)
+    return [f"  {label:<{width}}  {value}" for label, value in rows]
+
+
+def _problem_sections(
+    failures: tuple[CodeTally, ...],
+    skips: tuple[CodeTally, ...],
+) -> list[str]:
+    """The ``failed by code`` / ``skipped by code`` blocks, empty when there is nothing to say."""
+    body: list[str] = []
+    for title, tallies in (("failed by code", failures), ("skipped by code", skips)):
+        if not tallies:
+            continue
+        body.append("")
+        body.append(f"  {title}")
+        for tally in tallies:
+            body.append(f"    {tally.code}  x{tally.count}")
+            body.extend(f"      {path}" for path in tally.paths)
+    return body
+
+
+def _dedup_section(dedup: tuple[tuple[str, int], ...] | None) -> list[str]:
+    """The ``deduplication`` block, empty when the caller reported none."""
+    if dedup is None:
+        return []
+    return [
+        "",
+        "  deduplication",
+        "    " + ", ".join(f"{kind} {count}" for kind, count in dedup),
+    ]
 
 
 def _dedup_tally(
