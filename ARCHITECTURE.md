@@ -236,9 +236,7 @@ metadata, reusing the same helpers `Document` validates with. `summary()`
 omits `content` for exactly the reason `Document.summary()` does. How a
 document is split into chunks is §5.11.
 
-**Not yet created** (arrive with their own stages, still planned):
-`RetrievedChunk` → Stage 30, `Citation` + `Answer` → Stage 43,
-`TokenUsage` → Stage 51.
+**Not yet implemented:** `Citation` + `Answer` → Stage 43, `TokenUsage` → Stage 51.
 
 ### 5.2 Ingestion
 
@@ -827,8 +825,14 @@ class VectorIndex(Protocol):
         # structurally, so the pipeline writes through to real storage
     def similarity_search(self, query: str, *, k: int,
                           filter: MetadataFilter | None = None) -> list[RetrievedChunk]: ...
-        # MetadataFilter e.g. {"doc_id": {"$in": [...]}, "section": "Requirements"}
-        # not yet — needs RetrievedChunk to return (§5.4), lands with retrieval
+        # ``similarity_search`` is present (§5.3.5, Stage 30); it takes the
+        # ``Embedder`` this instance holds, embeds the query text, hands
+        # chroma the vector (not the text), and returns ``RetrievedChunk``
+        # records with the raw cosine distance — no filter validation yet
+        # (§5.4, filters stage validates ``where`` clauses), and no
+        # score conversion (§5.4's scoring stage converts distance to a
+        # score). The distance travels raw so a single number serves the
+        # same meaning everywhere in the retrieval chain.
     def delete_document(self, doc_id: str) -> int: ...          # returns chunks removed
         # implemented Stage 24 (§5.3.1)
     def count(self) -> int: ...
@@ -896,12 +900,13 @@ to provide them, and the rest written by the index.
 that could spoof it would make the overwrite protocol (§5.16) delete or
 spare the wrong document's rows.
 
-**No embeddings happen here.** Vectors arrive already aligned by
-§5.15, so the collection is created without an embedding function and a
-write can never trigger a model download. `similarity_search` is
-deliberately absent until `RetrievedChunk` exists to return (§5.4); when
-it lands, it will embed with our `Embedder` and query this same
-collection — a new method, not a change to these.
+**No embeddings happen on the write path.** Vectors arrive already aligned
+by §5.15, so the collection is created without an embedding function and
+a write can never trigger a model download. `similarity_search` (§5.3.5)
+embeds with the `Embedder` passed to the constructor — one query, one
+vector, no model download — and returns `RetrievedChunk` records with raw
+cosine distances, so score conversion stays a single job (§5.4's scoring
+stage).
 
 **Error translation is a policy, not a blanket `try`.** Chroma speaks
 `ChromaError` and its subclasses, the filesystem speaks `OSError`, the
@@ -1046,10 +1051,10 @@ write path, the SQLite document registry and the local-disk file store
 today, each joined later by adding one factory to its registry, and the
 rules below running for the newcomer automatically.
 
-The vector contract pinned here is the **write half** for now — `upsert`,
-`delete_document` and `count`; the read half (`similarity_search` with its
-`MetadataFilter`, returning `RetrievedChunk`) lands with retrieval
-(§5.4) and joins this suite then.
+The vector contract is the full picture since Stage 30 — `similarity_search`
+(with its ``MetadataFilter``, returning ``RetrievedChunk``, using the
+index's own ``Embedder``) joins ``upsert``, ``delete_document`` and ``count``
+here.
 
 **Cross-store legs close the loop.** The behaviour worth proving is not
 any single store but the hand-offs between them (§6.1): an upload saved by
@@ -1066,6 +1071,25 @@ hash lookup reaches. Two legs are proven:
 
 Both legs run against real storage (temporary Chroma directory, temporary
 registry file, temporary uploads root) with the offline embedder double.
+
+### 5.3.5 Chroma index read path (`storage/chroma.py`) — implemented in Stage 30
+
+The same :class:`ChromaIndex` that writes (§5.3.1) also searches, through
+``similarity_search(query, *, k, filter=None)`` — a new method, not a new
+class. It takes the ``Embedder`` this instance holds, embeds the query,
+passes the vector (not the text) to chroma's ``query``, and returns
+:class:`~app.domain.models.RetrievedChunk` records with the raw cosine
+distance. The distance travels unconverted: score conversion
+(``scoring.py``) and filter validation (``filters.py``) are separate
+retrieval-layer stages (§5.4), so there is only ever one number for one
+distance. The ``filter`` is handed through to chroma's ``where`` without
+validating its contents (a malformed ``where`` raises chroma's own
+``ValueError``, translated to ``ValidationError`` / ``invalid_filter``
+with the message preserved); which operators and value types are legal is
+enforced by the layer that builds filters, not here. A missing
+``embedder`` (``k < 1``, or a non-mapping ``filter``) raises typed errors
+(``ConfigurationError`` / ``invalid_top_k`` / ``invalid_filter``) before
+chroma is called.
 
 ### 5.4 Retrieval
 

@@ -1,29 +1,38 @@
-"""Persistent vector indexing over Chroma — the write path (Stage 24).
+"""Persistent vector indexing over Chroma — write path (Stage 24), read path (Stage 30).
 
 §5.3 puts two independent stores behind interfaces so either side can be
 swapped (Chroma → pgvector, SQLite → Postgres) without the rest of the
 system noticing. This module is the first of them: the part of
 :class:`~app.domain.models.Document`'s journey that *keeps* the vectors
-§5.15 produced, under the ids §5.11 stamped on them.
+§5.15 produced, under the ids §5.11 stamped on them — and, since Stage 30,
+the half that gives them back.
 
-Three decisions carry the weight.
+Four decisions carry the weight.
 
 **Raw ``chromadb``, not the LangChain wrapper.** §5.3's contract is
-deliberately ours — ``upsert`` / ``delete_document`` / ``count`` over
-:class:`~app.domain.models.Chunk` — and the LangChain integration
+deliberately ours — ``upsert`` / ``delete_document`` / ``count`` /
+``similarity_search`` over :class:`~app.domain.models.Chunk` — and the LangChain integration
 (``langchain-chroma`` is pinned for later, when generation and retrieval
 may want it) would be a second API to translate into a first. Talking to
 the client directly keeps one obvious mapping between our types and
 chroma's, and every call in this file is four lines or fewer precisely
 because nothing is being abstracted twice.
 
-**Vectors arrive, never get made here.** The index never embeds: chunks
-come in with their vectors already aligned (§5.15's ``embed_chunks``), so
-the collection is created *without* asking chroma for an embedding
-function and no model is ever downloaded by a write. The same rule will
-govern the query path when ``similarity_search`` lands with retrieval:
-embed with our :class:`~app.embeddings.base.Embedder`, then hand the
-vector over.
+**Vectors arrive on the write path; the query makes its own.** The index
+never embeds for a write: chunks come in with their vectors already
+aligned (§5.15's ``embed_chunks``), so the collection is created *without*
+asking chroma for an embedding function and no model is ever downloaded by
+a write. The read path embeds exactly one thing — the query — with the
+:class:`~app.embeddings.base.Embedder` its constructor was given, and hands
+chroma that vector rather than the text, so one embedding implementation
+serves both halves.
+
+**Results come back as records, not rows.** ``similarity_search`` returns
+:class:`~app.domain.models.RetrievedChunk` values; chroma's two-level list
+nesting, its ``documents`` / ``metadatas`` / ``distances`` columns and its
+index-owned metadata keys all stay inside this file. The distance travels
+**raw** — converting it to a score is the retrieval layer's job (§5.4), so
+there is only ever one number for one distance.
 
 **Metadata is copied verbatim, plus three keys the index owns.** The
 chunker attaches ``filename``, ``media_type`` and — where the source has
@@ -58,9 +67,18 @@ see the shared hierarchy:
   ``ValueError``, and every existing holder of that code raises
   ``DependencyError``, so the family stays consistent wherever the
   mismatch is first noticed (the same rule §5.15 followed);
-* chroma's ``InvalidArgumentError`` means a vector's dimension disagrees
-  with the collection's — raised as ``embedding_dimension_mismatch``,
-  detail preserving chroma's own message;
+* chroma's ``InvalidArgumentError`` means a vector disagreed with the
+  collection's dimension — on a write, a chunk's; on a search, the query
+  vector's — raised as ``embedding_dimension_mismatch``, detail
+  preserving chroma's own message;
+* a caller's mistake reaches the caller as ``ValidationError``: a blank
+  ``k`` (``invalid_top_k``), a filter that is not a mapping or that
+  chroma rejected (``invalid_filter``, chroma's message kept in
+  ``detail``);
+* searching on an index built without an ``embedder`` is a
+  ``ConfigurationError`` (``embedder_not_configured``) — the write path
+  deliberately needs no embedder, so its absence during a search is a
+  wiring mistake, not a storage failure;
 * anything else from chroma, the filesystem or the underlying sqlite
   store becomes ``DependencyError`` (``dependency_unavailable``), with
   the original message in ``detail`` only.
@@ -72,7 +90,7 @@ An empty ``collection_name`` is rejected up front as a
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, TypeVar
@@ -81,8 +99,9 @@ import chromadb
 from chromadb.errors import ChromaError, InvalidArgumentError
 
 from app.config import Settings
-from app.domain.errors import DependencyError, ValidationError
-from app.domain.models import Chunk
+from app.domain.errors import ConfigurationError, DependencyError, ValidationError
+from app.domain.models import Chunk, MetadataFilter, RetrievedChunk
+from app.embeddings.base import Embedder
 
 __all__ = ["COLLECTION_NAME", "ChromaIndex"]
 
@@ -93,15 +112,14 @@ _T = TypeVar("_T")
 
 
 class ChromaIndex:
-    """Write side of §5.3's ``VectorIndex`` over a persistent Chroma store.
+    """Both sides of §5.3's ``VectorIndex`` over a persistent Chroma store.
 
     Satisfies the ``ChunkStore`` interface
     :class:`app.ingestion.pipeline.IngestPipeline` declared (§5.16)
     structurally — same method names, same signatures — so the pipeline's
     store argument moves from the in-memory test double to this class
-    without a line of glue. ``similarity_search`` is deliberately absent
-    until ``RetrievedChunk`` exists to return (§5.4); adding it is a new
-    method, not a change to these.
+    without a line of glue. The read half arrived as a *new* method
+    (``similarity_search``, §5.3.5): adding it changed none of these.
 
     Parameters
     ----------
@@ -113,6 +131,13 @@ class ChromaIndex:
     collection_name:
         §5.3 fixes the production name at ``techdocs``; the parameter
         exists so tests and experiments can use isolated collections.
+    embedder:
+        Used only by :meth:`similarity_search`, to embed the query.
+        ``None`` — the default — is the write-only configuration the
+        pipeline and the ``index`` command need, since writes arrive with
+        vectors already attached; searching such an instance raises
+        ``ConfigurationError`` (``embedder_not_configured``) rather than
+        quietly skipping the embedding step.
 
     Raises
     ------
@@ -128,6 +153,7 @@ class ChromaIndex:
         *,
         persist_directory: Path | str | None = None,
         collection_name: str = COLLECTION_NAME,
+        embedder: Embedder | None = None,
     ) -> None:
         if not collection_name.strip():
             raise ValidationError(
@@ -140,6 +166,7 @@ class ChromaIndex:
             else Settings().chroma_persist_dir
         )
         self._persist_directory = directory
+        self._embedder = embedder
         self._collection = self._run(
             "open",
             lambda: chromadb.PersistentClient(path=str(directory)).get_or_create_collection(
@@ -153,9 +180,8 @@ class ChromaIndex:
         """The raw chroma collection.
 
         An escape hatch on purpose: tests inspect stored rows through it,
-        and the query path (§5.4, coming with retrieval) will call
-        ``query`` from here rather than growing a second handle to the
-        same data.
+        and :meth:`similarity_search` calls ``query`` from here rather
+        than growing a second handle to the same data.
         """
         return self._collection
 
@@ -221,6 +247,112 @@ class ChromaIndex:
         """Total chunks in the collection, across every document."""
         return int(self._run("count", lambda: self._collection.count()))
 
+    # -- reading ------------------------------------------------------------
+
+    def similarity_search(
+        self,
+        query: str,
+        *,
+        k: int,
+        filter: MetadataFilter | None = None,
+    ) -> list[RetrievedChunk]:
+        """Return the stored chunks nearest to ``query``, closest first.
+
+        The read half of §5.3's contract: embed the query with the
+        ``Embedder`` this index was built with, ask chroma for the
+        nearest rows (optionally constrained by ``filter``), and hand
+        back :class:`~app.domain.models.RetrievedChunk` records.
+
+        Parameters
+        ----------
+        query:
+            The question to search with. Non-blank — the embedder
+            enforces that (code ``empty_embedding_input``) before any
+            request is made.
+        k:
+            How many results to return *at most*; an integer ``>= 1``.
+            Fewer than ``k`` come back when the index (or the filter)
+            holds less: chroma pads nothing and errors on nothing, so an
+            over-large ``k`` asks for "everything you have" rather than
+            failing.
+        filter:
+            Metadata constraint handed to chroma as its ``where`` clause —
+            ``{"doc_id": {"$in": [...]}, "section": "Requirements"}`` and
+            friends (§5.3). Only its *shape* is checked here: which keys,
+            values and operators are legal is §5.4's filter layer's rule
+            to enforce, because that layer is what builds these. An empty
+            mapping means no constraint.
+
+        Returns
+        -------
+        list[RetrievedChunk]
+            Nearest first, in chroma's own order, carrying **raw** cosine
+            distances — see :class:`~app.domain.models.RetrievedChunk`
+            on why converting them to a score is deliberately someone
+            else's job.
+
+        Raises
+        ------
+        ValidationError
+            ``k`` is not an integer ``>= 1`` (``invalid_top_k``); the
+            filter is not a mapping (``invalid_filter``); or chroma
+            rejected the filter's contents (``invalid_filter`` again,
+            chroma's message in ``detail``).
+        ConfigurationError
+            This index was constructed without an embedder
+            (``embedder_not_configured``).
+        DependencyError
+            The query vector's dimension disagrees with the collection's
+            (``embedding_dimension_mismatch``), or the store refused the
+            read (``dependency_unavailable``).
+        """
+        if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+            raise ValidationError(
+                f"k must be an integer >= 1, got {k!r}",
+                code="invalid_top_k",
+            )
+        if filter is not None and not isinstance(filter, Mapping):
+            raise ValidationError(
+                f"filter must be a mapping, got {type(filter).__name__}",
+                code="invalid_filter",
+            )
+        if self._embedder is None:
+            raise ConfigurationError(
+                "This index has no embedder, so it cannot embed a query; "
+                "construct ChromaIndex(embedder=...) to enable searching.",
+                code="embedder_not_configured",
+            )
+
+        vector = self._embedder.embed_query(query)
+        # An empty mapping means "no constraint", which chroma's where
+        # clause has no spelling for; None is it.
+        where = dict(filter) if filter else None
+        # chroma's stubs type a batch as ``list[Sequence[float]]`` and
+        # ``list`` is invariant, so the element is widened explicitly —
+        # the same dance ``upsert`` does.
+        batch: list[Sequence[float]] = [vector]
+        try:
+            result = self._run(
+                "search",
+                lambda: self._collection.query(
+                    query_embeddings=batch,
+                    n_results=k,
+                    where=where,
+                    include=["documents", "metadatas", "distances"],
+                ),
+            )
+        except ValueError as exc:
+            # Chroma validates where clauses with a bare ValueError
+            # ("Expected where operator to be one of ..."), and the only
+            # caller-supplied structure in this call is the filter — so
+            # this is a caller mistake, not infrastructure trouble.
+            raise ValidationError(
+                "The vector index rejected the metadata filter.",
+                code="invalid_filter",
+                detail=str(exc),
+            ) from exc
+        return self._to_retrieved(result)
+
     # -- internals ----------------------------------------------------------
 
     @staticmethod
@@ -237,6 +369,47 @@ class ChromaIndex:
             "chunk_id": chunk.chunk_id,
             "ingested_at": ingested_at,
         }
+
+    @staticmethod
+    def _to_retrieved(result: Any) -> list[RetrievedChunk]:
+        """Flatten chroma's nested query result into ordered records.
+
+        chroma returns one inner list per query vector — this path always
+        queries with exactly one — and one parallel column per requested
+        field, nearest-first. The order is kept rather than re-sorted; an
+        empty collection (or a filter that matched nothing) arrives as
+        empty columns, which flattens to ``[]`` rather than an error.
+        """
+        rows = result
+
+        def column(name: str) -> list[Any]:
+            nested = rows.get(name)
+            return list(nested[0]) if nested else []
+
+        ids = column("ids")
+        contents = column("documents")
+        metadatas = column("metadatas")
+        distances = column("distances")
+
+        # chroma builds the four columns together, so a length mismatch
+        # would be a bug in the store rather than bad input — and a bug
+        # must look like a bug.
+        return [
+            RetrievedChunk(
+                chunk_id=chunk_id,
+                # The id is "<doc_id>:<index>", the same pairing the
+                # chunk was written with, so provenance is recovered from
+                # the id itself rather than trusted from a second copy in
+                # metadata. RetrievedChunk validates the pairing.
+                doc_id=chunk_id.partition(":")[0],
+                content=content,
+                distance=distance,
+                metadata=dict(metadata or {}),
+            )
+            for chunk_id, content, metadata, distance in zip(
+                ids, contents, metadatas, distances, strict=True
+            )
+        ]
 
     @staticmethod
     def _run(operation: str, action: Callable[[], _T]) -> _T:

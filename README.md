@@ -1,6 +1,12 @@
 # Technical Document Intelligence — RAG
 
-> **Status: early-stage foundation.** Stages 1-29 of a 60-stage plan are
+> **Status: stage 30 of 60.** The storage slice (§5.3) is complete — write
+> (`upsert` / `delete_document` / `count`, Stage 24) and read (`similarity_search`
+> returning `RetrievedChunk` with raw cosine distance, Stage 30) — with the
+> `Embedder` wired through the constructor (`embedder_not_configured` when
+> missing), `MetadataFilter` aliased in the domain, and the retrieval
+> layer (`retriever`, `scoring`, `filters`, `thresholds`) planned next.
+> **974 tests passing.**
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
 > the embedding layer (contract, OpenAI adapter, batching and bounded
@@ -185,20 +191,37 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   unchanged, and one broken file — unreadable, provider down, registry
   refusing — isolated to its own reported outcome while the batch carries
   on
-- ✅ The `index` command: it builds the embedder, the Chroma collection
-  and the document registry from settings, runs that pass over a
-  directory, and prints the index report — created, replaced, skipped and
-  failed with their codes, plus chunks written and the dedup tallies — as
-  text or JSON; a missing `OPENAI_API_KEY` stops it before any storage is
-  opened, with the configuration error's own message instead of a
-  half-written index
+- ✅ The `RetrievedChunk` domain model (``MetadataFilter`` alias, frozen/
+  slots, validated chunk-id pairing, typed ``filename``/``page``/``section``
+  accessors from metadata, ``summary()`` excludes ``content``; distance
+  validated as ``finite`` with near-zero-negative tolerance for floating-point
+  artifacts) and the ``similarity_search`` read path on ``ChromaIndex``
+  (``embedder`` constructor param, missing-embedder ``ConfigurationError``,
+  ``k`` validated as ``int >= 1``, ``filter`` validated as ``Mapping`` before
+  chroma; raw cosine distance returned unconverted, nearest-first; error
+  policy distinguishes ``ValueError`` from chroma's malformed ``where``
+  clauses → ``ValidationError`` / ``invalid_filter``)
+- ✅ The `index` CLI command (Stage 29): builds the embedder, Chroma
+  collection and registry from settings, runs the batch pass, prints
+  the index report with typed error codes; missing ``OPENAI_API_KEY``
+  stops before any storage touch
 - ✅ **974 tests passing**, with the chunking, embedding, pipeline and
   storage modules and the CLI measured at 100% branch-inclusive coverage
   alongside the rest of the pipeline modules
 
-**Planned — not yet implemented:**
+**Planned — retrieval layer continues (Stages 31–36):**
 
-- ⬜ Semantic retrieval, filtering and thresholds (Stages 30–36)
+- ✅ `RetrievedChunk` domain model + `similarity_search` read path on Chroma
+  (raw cosine distance; embedder wired through constructor; `embedder_not_configured`
+  when missing; `invalid_filter` / `invalid_top_k` typed errors before any
+  chroma call) — this stage
+- ⬜ `retrieval/retriever.py` top-k + MMR diversity (Stage 31)
+- ⬜ `retrieval/scoring.py` distance → score conversion, justified (Stage 32)
+- ⬜ `retrieval/filters.py` validated `MetadataFilter` (Stage 33)
+- ⬜ `retrieval/thresholds.py` optional score threshold (Stage 34)
+- ⬜ `retrieval/diagnostics.py` dev-only retrieval inspector (not routed) (Stage 35)
+- ⬜ Integration: retrieval wired into the query pipeline (§6.2) (Stage 36)
+- ⬜ Grounded answer generation with citations (Stages 37–44)
 - ⬜ Grounded answer generation with citations (Stages 37–44)
 - ⬜ Evaluation metrics and configuration experiments (Stages 45–52)
 - ⬜ Query and document-management API endpoints (Stages 53–57)

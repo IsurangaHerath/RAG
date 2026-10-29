@@ -14,6 +14,7 @@ No network, no API key, no filesystem writes.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 import pytest
@@ -24,6 +25,8 @@ from app.domain.models import (
     SUPPORTED_MEDIA_TYPES,
     Document,
     IngestStatus,
+    MetadataFilter,
+    RetrievedChunk,
     content_sha256,
     make_chunk_id,
     make_doc_id,
@@ -604,3 +607,157 @@ def test_enum_values_are_strings() -> None:
     """StrEnum lets status compare and serialise as a plain string."""
     assert IngestStatus.INDEXED == "indexed"
     assert str(IngestStatus.FAILED) == "failed"
+
+
+# =============================================================================
+# RetrievedChunk (Stage 30) — the read half's domain record
+# =============================================================================
+
+DOC_ID = "doc_0123456789abcdef"
+
+
+def make_retrieved(*, chunk_id: str = f"{DOC_ID}:0", distance: float = 0.25) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=chunk_id,
+        doc_id=DOC_ID,
+        content="the payments api settles in one day",
+        distance=distance,
+        metadata={
+            "filename": "api-spec.md",
+            "media_type": "text/markdown",
+            "section": "Requirements",
+            "page": 3,
+        },
+    )
+
+
+def test_retrieved_chunk_constructs() -> None:
+    result = make_retrieved()
+    assert result.doc_id == DOC_ID
+    assert result.chunk_id.startswith(f"{DOC_ID}:")
+    assert result.distance == 0.25
+    assert result.content == "the payments api settles in one day"
+
+
+def test_retrieved_chunk_id_matches_its_document() -> None:
+    result = make_retrieved(chunk_id=f"{DOC_ID}:7")
+    assert result.doc_id == DOC_ID
+
+
+def test_retrieved_chunk_id_rejected_when_wrong_doc() -> None:
+    """A result whose id names a different document is a broken provenance."""
+    with pytest.raises(ValidationError) as excinfo:
+        RetrievedChunk(
+            chunk_id=f"{DOC_ID}:1",
+            doc_id="doc_0000000000000000",
+            content="x",
+            distance=0.0,
+        )
+    assert excinfo.value.code == "invalid_chunk_id"
+
+
+def test_retrieved_chunk_rejects_mismatched_chunk_id() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        RetrievedChunk(
+            chunk_id=f"{DOC_ID}:wrong",
+            doc_id=DOC_ID,
+            content="x",
+            distance=0.0,
+        )
+    assert excinfo.value.code == "invalid_chunk_id"
+
+
+def test_retrieved_chunk_rejects_empty_content() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        RetrievedChunk(
+            chunk_id=f"{DOC_ID}:0",
+            doc_id=DOC_ID,
+            content="   ",
+            distance=0.0,
+        )
+    assert excinfo.value.code == "empty_content"
+
+
+def test_retrieved_chunk_distance_must_be_finite() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        RetrievedChunk(
+            chunk_id=f"{DOC_ID}:0",
+            doc_id=DOC_ID,
+            content="x",
+            distance=float("nan"),
+        )
+    assert excinfo.value.code == "invalid_distance"
+
+
+def test_retrieved_chunk_distance_must_be_approximately_non_negative() -> None:
+    result = make_retrieved(distance=-1e-6)
+    # Near-zero negative floating-point artifacts are allowed (cosine
+    # arithmetic rounds slightly past zero), but a clearly negative
+    # distance is impossible.
+    assert result.distance == -1e-6
+
+    with pytest.raises(ValidationError) as excinfo:
+        make_retrieved(distance=-1.0)
+    assert excinfo.value.code == "invalid_distance"
+
+
+def test_retrieved_chunk_distance_rejects_non_numeric() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        RetrievedChunk(
+            chunk_id=f"{DOC_ID}:0",
+            doc_id=DOC_ID,
+            content="x",
+            distance="close",
+        )
+    assert excinfo.value.code == "invalid_distance"
+
+
+def test_retrieved_chunk_derived_accessors_read_metadata() -> None:
+    result = make_retrieved()
+    assert result.filename == "api-spec.md"
+    assert result.page == 3
+    assert result.section == "Requirements"
+
+
+def test_retrieved_chunk_accessors_fallback_to_none() -> None:
+    result = RetrievedChunk(
+        chunk_id=f"{DOC_ID}:0",
+        doc_id=DOC_ID,
+        content="x",
+        distance=0.0,
+        metadata={"filename": 99},
+    )
+    # The key exists but the value is the wrong scalar — it falls back.
+    assert result.filename is None
+    assert result.page is None
+    assert result.section is None
+
+
+def test_retrieved_chunk_summary_omits_content() -> None:
+    result = make_retrieved()
+    summary = result.summary()
+    assert "content" not in summary
+    assert result.content not in str(summary)
+
+
+def test_retrieved_chunk_is_immutable() -> None:
+    import dataclasses
+
+    result = make_retrieved()
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        result.distance = 0.0  # type: ignore[misc]
+
+
+def test_metadata_filter_alias_is_mapping() -> None:
+    # The alias only names the shape — the retrieval layer enforces legality.
+
+    f: MetadataFilter = {"doc_id": {"$in": ["x"]}, "section": "Requirements"}
+    assert isinstance(f, Mapping)
+
+
+def test_retrieved_chunk_ignores_empty_filter_for_summary() -> None:
+    """The filter is never part of a result — it is a caller-side query."""
+    # This is a shape test: RetrievedChunk carries no filter field.
+    result = make_retrieved()
+    assert "filter" not in result.summary()

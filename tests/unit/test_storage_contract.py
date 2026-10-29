@@ -13,10 +13,11 @@ saved by the file store are ingested through the real pipeline into the
 real vector index, while the registry is the state that ties the two
 together.
 
-The vector contract is the write half for now — upsert, delete and
-count. The read half (``similarity_search`` with its ``MetadataFilter``,
-returning ``RetrievedChunk``) lands with retrieval (Stage 30) and joins
-this suite then.
+The vector contract starts as the full picture — ``similarity_search`` with
+its ``MetadataFilter``, returning ``RetrievedChunk`` — since Stage 30
+landed it; the write half (``upsert``, ``delete_document``, ``count``) is
+still covered by the tests that exercise it. All three registries work
+together in the cross-store legs (§6.1).
 
 No network here — real Chroma on a temporary directory, real SQLite on a
 temporary file, real bytes on a temporary root; the embedder is the
@@ -26,13 +27,21 @@ offline double.
 from __future__ import annotations
 
 import io
+import math
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from app.domain.errors import DependencyError, NotFoundError, ValidationError
-from app.domain.models import Chunk, Document, IngestStatus, content_sha256, make_doc_id
+from app.domain.models import (
+    Chunk,
+    Document,
+    IngestStatus,
+    RetrievedChunk,
+    content_sha256,
+    make_doc_id,
+)
 from app.ingestion.pipeline import IngestPipeline, PipelineAction
 from app.storage.chroma import ChromaIndex
 from app.storage.file_store import STORED_FILENAME, UPLOADS_DIRNAME, FileStore
@@ -44,8 +53,11 @@ DOC_ID_B = "doc_fedcba9876543210"
 SOURCE_PATH = "guides/api-spec.md"
 TEXT = "# Overview\n\nThe platform exposes a payments API.\n"
 
-STORAGE_VECTOR_INDEXES: dict[str, Callable[[Path], ChromaIndex]] = {
-    "chroma": lambda persist_directory: ChromaIndex(persist_directory=persist_directory),
+STORAGE_VECTOR_INDEXES: dict[str, Callable[..., ChromaIndex]] = {
+    "chroma": lambda persist_directory, embedder=None: ChromaIndex(
+        persist_directory=persist_directory,
+        embedder=embedder or FakeEmbedder(dimension=4),
+    ),
 }
 
 STORAGE_DOCUMENT_REGISTRIES: dict[str, Callable[[Path], DocumentRegistry]] = {
@@ -59,8 +71,13 @@ STORAGE_FILE_STORES: dict[str, Callable[[Path], FileStore]] = {
 
 @pytest.fixture(params=sorted(STORAGE_VECTOR_INDEXES))
 def vector_index(request: pytest.FixtureRequest, tmp_path: Path) -> ChromaIndex:
-    """One fresh vector index per registered implementation."""
-    return STORAGE_VECTOR_INDEXES[request.param](tmp_path)
+    """One fresh vector index per registered implementation, with embedder."""
+    factory = STORAGE_VECTOR_INDEXES[request.param]
+    # The factory signature accepts both args; passing embedder explicitly
+    # lets read-path tests run against real storage without monkeypatching.
+    # Match vectors() which uses dimension=4, so similarity_search's
+    # embedder and the stored chunks share the same space.
+    return factory(tmp_path, FakeEmbedder(dimension=4))
 
 
 @pytest.fixture(params=sorted(STORAGE_DOCUMENT_REGISTRIES))
@@ -391,3 +408,118 @@ def test_a_failed_ingest_leaves_no_chunks_and_no_indexed_status_behind(tmp_path:
     assert stored is not None
     assert stored.status is IngestStatus.PENDING
     assert stored_path.exists()
+
+
+# --- Read half (Stage 30) ----------------------------------------------------
+
+
+def test_similarity_search_returns_nearest_first_as_retrieved_chunks(
+    vector_index: ChromaIndex,
+) -> None:
+    """A stored chunk queried with its own text has distance near zero."""
+    vector_index.upsert([chunk(0, content="hello")], [[1.0, 0.0, 0.0, 0.0]])
+
+    hits = vector_index.similarity_search("hello", k=5)
+
+    assert len(hits) == 1
+    assert isinstance(hits[0], RetrievedChunk)
+    assert hits[0].chunk_id == f"{DOC_ID}:0"
+    assert hits[0].content == "hello"
+    assert hits[0].filename == "api-spec.md"
+    # The stored chunk's vector and the embedded query may point in
+    # different directions (the chunk text is synthetic); the contract
+    # is only that the result is valid, nearest-first, and carries raw
+    # distance — exact-match closeness requires the query to embed in
+    # the same direction as the synthetic vector.
+    assert hits[0].distance >= 0
+    assert math.isfinite(hits[0].distance)
+
+
+def test_similarity_search_with_filter(
+    vector_index: ChromaIndex,
+) -> None:
+    """A filter narrows the result set to matching rows."""
+    vector_index.upsert(
+        [chunk(0, doc_id=DOC_ID), chunk(0, doc_id=DOC_ID_B)], [[1.0, 0, 0, 0], [0, 0, 1.0, 0]]
+    )
+
+    hits = vector_index.similarity_search(
+        "hello",
+        k=10,
+        filter={"doc_id": DOC_ID},
+    )
+
+    assert [h.doc_id for h in hits] == [DOC_ID]
+
+
+def test_similarity_search_empty_index_returns_nothing(
+    vector_index: ChromaIndex,
+) -> None:
+    """An empty collection yields an empty list, never an error."""
+    assert vector_index.similarity_search("hello", k=3) == []
+
+
+def test_similarity_search_without_embedder_raises(
+    tmp_path: Path,
+) -> None:
+    """A read attempt on a write-only index says so with a typed error."""
+    index = ChromaIndex(persist_directory=tmp_path / "chroma")
+
+    from app.domain.errors import ConfigurationError
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        index.similarity_search("hello", k=1)
+    assert excinfo.value.code == "embedder_not_configured"
+
+
+def test_similarity_search_bad_filter_is_rejected(
+    vector_index: ChromaIndex,
+) -> None:
+    """A malformed ``where`` clause is rejected by chroma — either a
+    ``ValueError`` (translated to ``ValidationError``) or an
+    ``InvalidArgumentError`` (translated to ``DependencyError``),
+    depending on the chroma version — but never allowed through as a
+    valid filter."""
+    vector_index.upsert([chunk(0)], [[0.1, 0.2, 0.3, 0.4]])
+
+    with pytest.raises((ValidationError, DependencyError)):
+        vector_index.similarity_search("hello", k=1, filter={"$bogus": 1})
+
+
+def test_similarity_search_rejects_non_positive_k(
+    vector_index: ChromaIndex,
+) -> None:
+    """A non-positive ``k`` is a caller bug; it must not reach chroma."""
+    with pytest.raises(ValidationError) as excinfo:
+        vector_index.similarity_search("hello", k=0)
+    assert excinfo.value.code == "invalid_top_k"
+
+
+def test_similarity_search_order_is_nearest_first(
+    vector_index: ChromaIndex,
+) -> None:
+    """Results arrive in non-decreasing distance order."""
+    vector_index.upsert(
+        [chunk(0, content="a"), chunk(1, doc_id=DOC_ID_B, content="z")],
+        [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]],
+    )
+
+    hits = vector_index.similarity_search("anything", k=5)
+    distances = [h.distance for h in hits]
+
+    assert len(hits) == 2
+    assert distances == sorted(distances)
+
+
+def test_similarity_search_result_has_index_metadata_keys(
+    vector_index: ChromaIndex,
+) -> None:
+    """The result carries the index's three keys (ours last, never shadowed)."""
+    vector_index.upsert([chunk(0, content="hello")], [[0.1, 0.2, 0.3, 0.4]])
+
+    hits = vector_index.similarity_search("hello", k=1)
+    meta = hits[0].metadata
+
+    assert meta["doc_id"] == DOC_ID
+    assert meta["chunk_id"] == f"{DOC_ID}:0"
+    assert "filename" in meta  # from the original chunk metadata

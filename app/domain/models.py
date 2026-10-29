@@ -27,6 +27,7 @@ never be cleaned up.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -636,12 +637,173 @@ class Chunk:
         }
 
 
+#: A metadata filter as §5.3's ``similarity_search`` accepts one: a field
+#: name mapped to a value or an operator mapping, e.g.
+#: ``{"doc_id": {"$in": [...]}, "section": "Requirements"}``. The domain
+#: only names the *shape* — which keys and operators are legal is the
+#: retrieval layer's rule to enforce, because a filter is built per query
+#: rather than per stored record.
+type MetadataFilter = Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievedChunk:
+    """A chunk as a search returned it: the text, plus how close it came.
+
+    §5.3's ``similarity_search`` hands these back instead of raw store
+    rows, for the same reason the rest of this module exists — a caller
+    should never have to know that chroma nests its results two lists
+    deep, or which metadata keys the index owns. The shape deliberately
+    mirrors :class:`Chunk` (same ids, same content, same metadata), so
+    anything that can render a chunk can render a result; what is added
+    is ``distance``.
+
+    Immutable, like every record here: a result set is handed down a
+    retrieval chain — dedupe, threshold, rerank — while other work may
+    still be reading it.
+
+    Parameters
+    ----------
+    chunk_id:
+        ``"<doc_id>:<index>"`` exactly as stored, validated with the same
+        rule :class:`Chunk` validates with — a result cannot name a chunk
+        the index never wrote.
+    doc_id:
+        Document the chunk came from. Built by the store from the same
+        pairing the id encodes, so the two cannot disagree.
+    content:
+        The stored text, quoted back verbatim. ``summary()`` excludes it
+        for the reason ``Chunk.summary()`` does.
+    distance:
+        **Raw** cosine distance from the query vector: ``0.0`` means the
+        stored vector points the same way as the query, larger means
+        farther (cosine distance cannot go below zero). Converting it to
+        a 0-1 score, and deciding which score is close enough, belong to
+        the retrieval layer (§5.4) — inventing a second meaning for this
+        number here would leave two numbers in circulation for one
+        distance.
+    metadata:
+        Stored metadata verbatim, the index's own keys (``doc_id``,
+        ``chunk_id``, ``ingested_at``) included. JSON scalars only, as
+        everywhere in this module.
+    """
+
+    chunk_id: str
+    doc_id: str
+    content: str
+    distance: float
+    metadata: Mapping[str, str | int | float | bool] = field(default_factory=dict)
+
+    # -- validation ---------------------------------------------------------
+
+    def __post_init__(self) -> None:
+        """Validate every field once, at construction time."""
+        # Validate the mapping BEFORE dict() coerces it — a non-mapping
+        # would raise a bare ValueError from inside dict(), the same trap
+        # Document.create documents.
+        _validate_metadata(self.metadata)
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+        _require(self.doc_id, "doc_id")
+        if not _DOC_ID_RE.match(self.doc_id):
+            raise ValidationError(
+                f"doc_id must look like 'doc_' + 16 hex chars, got {self.doc_id!r}",
+                code="invalid_doc_id",
+            )
+
+        _require(self.chunk_id, "chunk_id")
+        owner, separator, position = self.chunk_id.partition(":")
+        if not (separator and owner == self.doc_id and position.isdigit()):
+            raise ValidationError(
+                f"chunk_id must look like '{self.doc_id}:<index>', got {self.chunk_id!r}",
+                code="invalid_chunk_id",
+            )
+        expected = make_chunk_id(self.doc_id, int(position))
+        if self.chunk_id != expected:
+            # The shape check above accepts a zero-padded suffix
+            # ("doc_...:007"), which decodes to the same index yet is not
+            # the id this document's chunks are written under; re-deriving
+            # catches what pattern-matching cannot.
+            raise ValidationError(
+                f"chunk_id must be {expected!r} for this doc_id and index, got {self.chunk_id!r}",
+                code="invalid_chunk_id",
+            )
+
+        _require(self.content, "content")
+
+        # bool before int, for the usual reason: True is an int that would
+        # pass as a distance of 1.
+        if isinstance(self.distance, bool) or not isinstance(self.distance, (int, float)):
+            raise ValidationError(
+                f"distance must be a number, got {type(self.distance).__name__}",
+                code="invalid_distance",
+            )
+        # Cosine distance is never negative in principle, but floating-point
+        # arithmetic on near-identical vectors can yield values like -2e-07
+        # (observed empirically from chromadb); the meaningful bound is that
+        # the distance is approximately non-negative.
+        if not math.isfinite(self.distance) or self.distance < -1e-5:
+            raise ValidationError(
+                f"distance must be approximately non-negative, got {self.distance!r}",
+                code="invalid_distance",
+            )
+
+    # -- derived helpers ----------------------------------------------------
+
+    @property
+    def char_count(self) -> int:
+        """Number of characters of the retrieved text."""
+        return len(self.content)
+
+    @property
+    def filename(self) -> str | None:
+        """Source file's name, or ``None`` when the row does not record one.
+
+        Typed, because ``metadata`` types every value as a scalar: without
+        this, every consumer of the same key would write its own
+        ``isinstance`` dance and disagree about the fallback.
+        """
+        value = self.metadata.get("filename")
+        return value if isinstance(value, str) else None
+
+    @property
+    def page(self) -> int | None:
+        """1-based page for a paged source; ``None`` for unpaged text."""
+        value = self.metadata.get("page")
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return value
+
+    @property
+    def section(self) -> str | None:
+        """Heading path a Markdown chunk sits under; ``None`` when absent."""
+        value = self.metadata.get("section")
+        return value if isinstance(value, str) else None
+
+    def summary(self) -> dict[str, Any]:
+        """Return a JSON-safe summary for API responses and logs.
+
+        Excludes ``content``, exactly as ``Document.summary`` and
+        ``Chunk.summary`` do — a result's text is what a user is about to
+        be quoted, so it is the last thing that should reach a log line.
+        """
+        return {
+            "chunk_id": self.chunk_id,
+            "doc_id": self.doc_id,
+            "char_count": self.char_count,
+            "distance": self.distance,
+            "metadata": dict(self.metadata),
+        }
+
+
 __all__ = [
     "EXTENSION_TO_MEDIA_TYPE",
     "SUPPORTED_MEDIA_TYPES",
     "Chunk",
     "Document",
     "IngestStatus",
+    "MetadataFilter",
+    "RetrievedChunk",
     "content_sha256",
     "make_chunk_id",
     "make_doc_id",
