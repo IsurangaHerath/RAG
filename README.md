@@ -1,12 +1,13 @@
 # Technical Document Intelligence — RAG
 
-> **Status: stage 30 of 60.** The storage slice (§5.3) is complete — write
-> (`upsert` / `delete_document` / `count`, Stage 24) and read (`similarity_search`
-> returning `RetrievedChunk` with raw cosine distance, Stage 30) — with the
-> `Embedder` wired through the constructor (`embedder_not_configured` when
-> missing), `MetadataFilter` aliased in the domain, and the retrieval
-> layer (`retriever`, `scoring`, `filters`, `thresholds`) planned next.
-> **974 tests passing.**
+> **Status: stage 31 of 60.** Storage (§5.3) complete — read (`similarity_search`,
+> Stage 30) + write (`upsert`/`delete_document`/`count`, Stage 24) — and
+> retrieval (§5.4) started: `retriever.py` with MMR diversity selection
+> (`MMR_LAMBDA` = 0.7, adjustable 0–1) over `RetrievalQuery` (standalone
+> question + optional `filter`). The retrieval layer (`scoring`, `filters`,
+> `thresholds`, `diagnostics`, `reranker` integration) continues.
+> **1011 tests passing** (0 failures, all offline — no live OpenAI call
+> made at any stage).
 > complete. File discovery and loading (TXT, Markdown and PDF) and splitting
 > that text into page- and section-attributed chunks now work and are tested;
 > the embedding layer (contract, OpenAI adapter, batching and bounded
@@ -201,13 +202,12 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   chroma; raw cosine distance returned unconverted, nearest-first; error
   policy distinguishes ``ValueError`` from chroma's malformed ``where``
   clauses → ``ValidationError`` / ``invalid_filter``)
+- ✅ The retrieval retriever (`retrieval/retriever.py`, Stage 31): `RetrievalQuery` model, `Retriever` protocol, concrete `MMRRetriever` (MMR `lambda=0.7`, nearest-first, respects `k`, uses same `Embedder` as index); `MMR_LAMBDA` exported
 - ✅ The `index` CLI command (Stage 29): builds the embedder, Chroma
   collection and registry from settings, runs the batch pass, prints
   the index report with typed error codes; missing ``OPENAI_API_KEY``
   stops before any storage touch
-- ✅ **974 tests passing**, with the chunking, embedding, pipeline and
-  storage modules and the CLI measured at 100% branch-inclusive coverage
-  alongside the rest of the pipeline modules
+- ✅ **1011 tests passing**, with chunking, embedding, pipeline, retrieval (`retriever`), storage (read + write), CLI (`prepare`/`ingest`/`index`) and domain model at 100% branch coverage
 
 **Planned — retrieval layer continues (Stages 31–36):**
 
@@ -215,7 +215,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   (raw cosine distance; embedder wired through constructor; `embedder_not_configured`
   when missing; `invalid_filter` / `invalid_top_k` typed errors before any
   chroma call) — this stage
-- ⬜ `retrieval/retriever.py` top-k + MMR diversity (Stage 31)
+- ✅ `retrieval/retriever.py` top-k + MMR diversity (Stage 31)
 - ⬜ `retrieval/scoring.py` distance → score conversion, justified (Stage 32)
 - ⬜ `retrieval/filters.py` validated `MetadataFilter` (Stage 33)
 - ⬜ `retrieval/thresholds.py` optional score threshold (Stage 34)
