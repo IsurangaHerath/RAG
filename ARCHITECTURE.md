@@ -1657,6 +1657,62 @@ A missing file returns a `failed` result rather than raising, and both
 the log line and `summary()` are checked to carry ids and counts but
 never document text.
 
+### 5.17 Batch indexing (`ingestion/indexer.py`) — implemented in Stage 28
+
+§5.16's `IngestPipeline` indexes *one* document when someone hands it a
+file. Nothing yet walked a whole directory, owned the registry row a
+document is supposed to have while work is happening (§6.1), and reported
+on the batch — which is exactly what the upcoming `index` command needs.
+`index_directory(root, *, embedder, store, registry, chunker=None,
+recursive=True)` is that pass: **discover → load → classify → register the
+row → `pipeline.run()` → mark INDEXED or FAILED**, once per supported file,
+returning an `IndexResult` of one `IndexOutcome` per file.
+
+**The row exists before the chunks do.** §6.1's diagram puts `create row
+status=PENDING` before the enqueue for a reason — the crash window. A
+process that dies mid-write leaves a row stuck non-terminal, and *that* is
+what tells the next run to redo the document; no row at all says nothing.
+So the ordering here is register → walk to `INDEXING` → run the pipeline,
+and the matching invariant is that a registry failure aborts *this document
+only*: chunks are never written without a row to own them, and one refused
+row never stops the batch.
+
+**Classification seeds from `INDEXED` rows only.** A row's presence says
+"some record exists"; only `INDEXED` says "these bytes are in the vector
+index". Seeding deduplication from every row would make a document whose
+previous attempt *failed* classify as `unchanged` and never be retried.
+Status lookups still see every row (a stalled one must be reported, and a
+load failure retires a non-terminal row to `FAILED`); only the dedup view
+is filtered, so a retry lands as `new` and rewrites cleanly.
+
+**Statuses are recorded in the order they become true.** The lifecycle
+graph (§5.1) forbids `PENDING → INDEXED`, so the walk passes through
+`PARSING` and `INDEXING`; because the pipeline is one atomic call from the
+outside, both are recorded at the hand-off, and `INDEXED` only *after* the
+write returns. A status write that fails leaves the row at the state it
+actually reached — never `INDEXED` unverified — while `chunk_count` still
+reports what reached the store, because the count describes the store, not
+the status. `FAILED` always carries `code: reason` (§6.1's own shape).
+
+**No FileStore, stated outright.** A directory named on a command line is
+read in place: copying the corpus into `data/uploads` would double every
+byte on disk for no benefit, and §5.3.3's `FileStore` belongs to the upload
+flow on the API side. An emptied or re-broken *previously indexed* file
+likewise keeps its old chunks and its terminal row — removing them is a
+deletion's job, not a batch pass's — with the outcome reporting the problem
+either way. The double-read this implies (the service pre-loads text to
+build the row, the pipeline re-reads to chunk it) is accepted: correctness
+comes from the replace-then-upsert protocol, and the alternative is a
+redesigned pipeline signature for no measurable gain.
+
+Per-file isolation follows §5.2.5: one broken file never stops the batch,
+and only deliberate `RAGError` is caught — a defect keeps its traceback.
+The pass always returns a result for a valid root, even when every file
+failed (an all-failures batch is information, not an exception); a missing
+root or a registry that cannot be listed at all are *cannot run* errors and
+propagate. 26 tests cover the module at 100% branch coverage, including one
+against a real on-disk Chroma index.
+
 ## 6. Data Flow
 
 ### 6.1 Upload → index
