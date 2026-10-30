@@ -150,7 +150,7 @@ def inspect_retrieval(
     # Delegate to the concrete retriever (§5.4, Stage 31) — same path the
     # API would take, but without routing through any endpoint.
 
-    retriever = MMRRetriever(index=index, embedder=index._embedder)  # type: ignore[attr-defined]
+    retriever = MMRRetriever(index=index, embedder=index._embedder)  # type: ignore[attr-defined, arg-type]
     chunks = retriever.retrieve(
         RetrievalQuery(query=query, filter=filter_applied),
         k=k,

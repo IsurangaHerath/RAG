@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from app.domain.errors import ValidationError
-from app.retrieval.filters import FilterValidator, VALID_WHERE_OPERATORS, validate_filter
+from app.retrieval.filters import VALID_WHERE_OPERATORS, FilterValidator, validate_filter
 
 
 def test_empty_filter_is_valid() -> None:

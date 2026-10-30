@@ -796,6 +796,53 @@ class RetrievedChunk:
         }
 
 
+# --- Grounded context (retrieval -> generation hand-off) ------------------
+
+
+@dataclass(frozen=True, slots=True)
+class GroundedContext:
+    """The evidence set that grounds a generation response (section 5.4 -> 5.5).
+
+    Produced by ContextBuilder.build(), consumed by PromptBuilder.build()
+    and GroundingChecker.check(). Carries citation mapping, truncated chunk
+    texts with provenance, and budget applied.
+    """
+
+    query: str
+    chunks: list[RetrievedChunk]
+    citation_mapping: Mapping[int, RetrievedChunk]
+    budget_tokens: int | None = None
+    truncated: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "budget_tokens": self.budget_tokens,
+            "truncated": self.truncated,
+            "chunk_count": len(self.chunks),
+            "citations": {
+                str(marker): chunk.chunk_id for marker, chunk in self.citation_mapping.items()
+            },
+            "chunks": [
+                {
+                    "citation": i,
+                    "chunk_id": chunk.chunk_id,
+                    "filename": chunk.filename,
+                    "page": chunk.page,
+                    "section": chunk.section,
+                    "preview": chunk.content[:200],
+                    "distance_raw": chunk.distance,
+                }
+                for i, chunk in enumerate(self.chunks, start=1)
+            ],
+        }
+
+    def to_json(self, *, indent: int = 2) -> str:
+        import json
+
+        return json.dumps(self.to_dict(), indent=indent)
+
+
 __all__ = [
     "EXTENSION_TO_MEDIA_TYPE",
     "SUPPORTED_MEDIA_TYPES",

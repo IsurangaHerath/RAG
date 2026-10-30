@@ -104,6 +104,7 @@ def test_inspection_never_returns_full_content(index, embedder) -> None:
         assert inspection.selected_chunks[0].content_preview != full
         assert len(inspection.selected_chunks[0].content_preview) < len(full)
 
+
 # --- Validation (same typed errors as retrieval layer) ----------------------
 
 
@@ -120,7 +121,7 @@ def test_inspection_rejects_non_positive_k(index, embedder) -> None:
 def test_inspection_rejects_bad_filter(index, embedder) -> None:
     # A malformed `where` reaches chroma as either ValueError or
     # InvalidArgumentError (version-dependent); rejected before result.
-    with pytest.raises(Exception):
+    with pytest.raises((ValidationError, Exception)):
         inspect_retrieval("q", index=index, filter_applied={"$bogus": 1})
 
 
