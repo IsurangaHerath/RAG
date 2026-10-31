@@ -24,7 +24,9 @@ occurred.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
+
+from langchain_core.messages import BaseMessage
 
 from app.domain.errors import ConfigurationError, ValidationError
 from app.domain.models import GroundedContext
@@ -45,7 +47,7 @@ class QueryPipeline(Protocol):
         self,
         query: str,
         *,
-        filter_applied: dict | None = None,
+        filter_applied: dict[str, Any] | None = None,
         k: int = 20,
         budget_tokens: int = 3000,
     ) -> GroundedContext: ...
@@ -73,7 +75,7 @@ class GroundedAnswerPipeline:
         llm_client: LLMClient | None = None,
         embedder: object = None,
     ) -> None:
-        if index._embedder is None:  # type: ignore[attr-defined]
+        if index._embedder is None:
             raise ConfigurationError(
                 "Pipeline requires an index with an embedder; construct ChromaIndex(embedder=...)",
                 code="embedder_not_configured",
@@ -81,7 +83,7 @@ class GroundedAnswerPipeline:
         # The retriever uses the index's embedder (§5.3.5); the pipeline
         # does not create a separate one, so query and chunk embeddings
         # stay in the same space.
-        self._retriever = MMRRetriever(index=index, embedder=index._embedder)  # type: ignore[attr-defined]
+        self._retriever = MMRRetriever(index=index, embedder=index._embedder)
         self._builder = SimpleContextBuilder()
         self._prompt_builder = GroundingPromptBuilder()
         self._llm = llm_client
@@ -90,7 +92,7 @@ class GroundedAnswerPipeline:
         self,
         query: str,
         *,
-        filter_applied: dict | None = None,
+        filter_applied: dict[str, Any] | None = None,
         k: int = 20,
         budget_tokens: int = 3000,
     ) -> GroundedContext:
@@ -126,10 +128,10 @@ class GroundedAnswerPipeline:
         self,
         query: str,
         *,
-        filter_applied: dict | None = None,
+        filter_applied: dict[str, Any] | None = None,
         k: int = 20,
         budget_tokens: int = 3000,
-    ) -> list[object]:
+    ) -> list[BaseMessage]:
         """Full §6.2 flow through `GroundedContext`; does not call LLM.
 
         Returns the `list[BaseMessage]` that `LLMClient.generate_messages()`

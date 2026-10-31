@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from langchain_chat_models import ChatOpenAI
+from langchain_chat_models import ChatOpenAI  # type: ignore[import-not-found]
 from langchain_core.messages import BaseMessage
 
 from app.config import Settings

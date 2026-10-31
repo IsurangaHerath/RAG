@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from app.domain.errors import ValidationError
+from app.domain.errors import DependencyError, ValidationError
 from app.domain.models import Chunk
 from app.retrieval.diagnostics import (
     RETRIEVAL_INSPECTION_MAX_PREVIEW,
@@ -119,10 +119,16 @@ def test_inspection_rejects_non_positive_k(index, embedder) -> None:
 
 
 def test_inspection_rejects_bad_filter(index, embedder) -> None:
-    # A malformed `where` reaches chroma as either ValueError or
-    # InvalidArgumentError (version-dependent); rejected before result.
-    with pytest.raises((ValidationError, Exception)):
+    # A malformed `where` is rejected by chroma before any result is
+    # returned; depending on the chroma version it surfaces either as a
+    # validation error or through the storage adapter's error mapping.
+    with pytest.raises((ValidationError, DependencyError)) as excinfo:
         inspect_retrieval("q", index=index, filter_applied={"$bogus": 1})
+    assert excinfo.value.code in {
+        "invalid_filter",
+        "embedding_dimension_mismatch",
+        "dependency_unavailable",
+    }
 
 
 def test_inspection_rejects_bad_lambda(index, embedder) -> None:
