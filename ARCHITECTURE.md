@@ -236,7 +236,7 @@ metadata, reusing the same helpers `Document` validates with. `summary()`
 omits `content` for exactly the reason `Document.summary()` does. How a
 document is split into chunks is §5.11.
 
-**Not yet implemented:** `Citation` + `Answer` → Stage 43, `TokenUsage` → Stage 51.
+**Implemented (§5.5):** `Citation` + `Answer` (verified, redacted payload) with `LLMClient`; `metrics.py` and `runner.py` implemented (§5.8, 45–52) but thresholds/regression gate and reproducible benchmark numbers are pending. `TokenUsage` → Stage 51: metrics module exists, token usage tracking integrated but benchmark results unmeasured.
 
 ### 5.2 Ingestion
 

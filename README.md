@@ -216,10 +216,12 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 
 **Remaining work:**
 
-- ⬜ Wire `LLMClient` into the answer path so a `GroundedContext` becomes
-  an `Answer`, and run `validate_citations()` on the model output
-- ⬜ `Citation` and `Answer` domain models, streaming responses
-- ⬜ Evaluation metrics and configuration experiments (Stages 45–52)
+- ✅ `LLMClient` adapter (real `ChatOpenAI` with mapped errors) wired into `GroundedAnswerPipeline.answer()`; citations validated programmatically
+- ✅ `Citation` and `Answer` domain models with validation, `to_dict()`, `summary()` redacted payloads
+- ✅ Evaluation package (`metrics.py`, `runner.py`) with P@k, R@k, F1@k, MRR, nDCG; golden dataset; CSV and Markdown reports; no model required to score retrieval
+- ✅ Prompt layer passes full budgeted evidence (not previews); citation legend matches `citation_mapping`
+- ⬜ Streaming responses (`LLMClient.generate_messages` supports list response; streaming is next)
+- ⬜ Evaluation metrics configured with thresholds and regression gate (§5.8); evaluation runs are reproducible, but no benchmark results exist yet
 - ⬜ Query and document-management API endpoints (Stages 53–57)
 - ⬜ Docker image and Compose deployment (Stages 58–60)
 

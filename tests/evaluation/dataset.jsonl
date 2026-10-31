@@ -1,0 +1,3 @@
+{"query":"What is the fee for payments?","relevant_chunks":["doc_0123456789abcdef:0","doc_0123456789abcdef:1"],"graded_relevance":{"doc_0123456789abcdef:0":2.0,"doc_0123456789abcdef:1":1.0}}
+{"query":"How does authentication work?","relevant_chunks":["doc_0123456789abcdef:2"],"graded_relevance":{"doc_0123456789abcdef:2":1.0}}
+{"query":"How many pages does the API spec have?","relevant_chunks":[],"graded_relevance":{}}
