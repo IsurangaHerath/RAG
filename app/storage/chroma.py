@@ -1,15 +1,15 @@
 """Persistent vector indexing over Chroma — write path (Stage 24), read path (Stage 30).
 
-§5.3 puts two independent stores behind interfaces so either side can be
+section 5.3 puts two independent stores behind interfaces so either side can be
 swapped (Chroma → pgvector, SQLite → Postgres) without the rest of the
 system noticing. This module is the first of them: the part of
 :class:`~app.domain.models.Document`'s journey that *keeps* the vectors
-§5.15 produced, under the ids §5.11 stamped on them — and, since Stage 30,
+section 5.15 produced, under the ids section 5.11 stamped on them — and, since Stage 30,
 the half that gives them back.
 
 Four decisions carry the weight.
 
-**Raw ``chromadb``, not the LangChain wrapper.** §5.3's contract is
+**Raw ``chromadb``, not the LangChain wrapper.** section 5.3's contract is
 deliberately ours — ``upsert`` / ``delete_document`` / ``count`` /
 ``similarity_search`` over :class:`~app.domain.models.Chunk` — and the LangChain integration
 (``langchain-chroma`` is pinned for later, when generation and retrieval
@@ -20,7 +20,7 @@ because nothing is being abstracted twice.
 
 **Vectors arrive on the write path; the query makes its own.** The index
 never embeds for a write: chunks come in with their vectors already
-aligned (§5.15's ``embed_chunks``), so the collection is created *without*
+aligned (section 5.15's ``embed_chunks``), so the collection is created *without*
 asking chroma for an embedding function and no model is ever downloaded by
 a write. The read path embeds exactly one thing — the query — with the
 :class:`~app.embeddings.base.Embedder` its constructor was given, and hands
@@ -31,21 +31,21 @@ serves both halves.
 :class:`~app.domain.models.RetrievedChunk` values; chroma's two-level list
 nesting, its ``documents`` / ``metadatas`` / ``distances`` columns and its
 index-owned metadata keys all stay inside this file. The distance travels
-**raw** — converting it to a score is the retrieval layer's job (§5.4), so
+**raw** — converting it to a score is the retrieval layer's job (section 5.4), so
 there is only ever one number for one distance.
 
 **Metadata is copied verbatim, plus three keys the index owns.** The
 chunker attaches ``filename``, ``media_type`` and — where the source has
-them — ``page`` / ``section`` (§5.11, see ``Chunk.metadata``), which is
-exactly §5.3's schema; the index adds ``doc_id``, ``chunk_id`` and
+them — ``page`` / ``section`` (section 5.11, see ``Chunk.metadata``), which is
+exactly section 5.3's schema; the index adds ``doc_id``, ``chunk_id`` and
 ``ingested_at``. Those three are written *after* the chunk's own keys so
 a mislabelled chunk can never spoof its own identity: ``doc_id`` is what
 ``delete_document`` filters on, and a metadata row lying about it would
-make the overwrite protocol (§5.16) delete or spare the wrong document.
+make the overwrite protocol (section 5.16) delete or spare the wrong document.
 
 Persistence and idempotency
 ---------------------------
-One collection, ``techdocs`` (§5.3), with a cosine HNSW space — cosine
+One collection, ``techdocs`` (section 5.3), with a cosine HNSW space — cosine
 because retrieval cares about direction, not magnitude, and every
 embedding model we might swap to produces normalised-ish vectors whose
 magnitude carries no meaning. ``persist_directory`` comes from
@@ -55,7 +55,7 @@ magnitude carries no meaning. ``persist_directory`` comes from
 promise: writing the same chunk twice replaces it, so re-ingesting an
 unchanged or edited document converges on the same final state rather
 than accumulating copies. ``delete_document`` returns how many rows it
-removed (§5.3) — the count the pipeline reports as ``deleted_count``.
+removed (section 5.3) — the count the pipeline reports as ``deleted_count``.
 
 Error policy — one class per kind of trouble
 --------------------------------------------
@@ -66,7 +66,7 @@ see the shared hierarchy:
   sees it, as ``embedding_count_mismatch`` — chroma would raise a bare
   ``ValueError``, and every existing holder of that code raises
   ``DependencyError``, so the family stays consistent wherever the
-  mismatch is first noticed (the same rule §5.15 followed);
+  mismatch is first noticed (the same rule section 5.15 followed);
 * chroma's ``InvalidArgumentError`` means a vector disagreed with the
   collection's dimension — on a write, a chunk's; on a search, the query
   vector's — raised as ``embedding_dimension_mismatch``, detail
@@ -105,21 +105,21 @@ from app.embeddings.base import Embedder
 
 __all__ = ["COLLECTION_NAME", "ChromaIndex"]
 
-#: §5.3: the single persistent collection every tech-docs chunk lives in.
+#: section 5.3: the single persistent collection every tech-docs chunk lives in.
 COLLECTION_NAME: Final = "techdocs"
 
 _T = TypeVar("_T")
 
 
 class ChromaIndex:
-    """Both sides of §5.3's ``VectorIndex`` over a persistent Chroma store.
+    """Both sides of section 5.3's ``VectorIndex`` over a persistent Chroma store.
 
     Satisfies the ``ChunkStore`` interface
-    :class:`app.ingestion.pipeline.IngestPipeline` declared (§5.16)
+    :class:`app.ingestion.pipeline.IngestPipeline` declared (section 5.16)
     structurally — same method names, same signatures — so the pipeline's
     store argument moves from the in-memory test double to this class
     without a line of glue. The read half arrived as a *new* method
-    (``similarity_search``, §5.3.5): adding it changed none of these.
+    (``similarity_search``, section 5.3.5): adding it changed none of these.
 
     Parameters
     ----------
@@ -129,7 +129,7 @@ class ChromaIndex:
         configured) — tests always pass an explicit temporary directory
         so no test ever writes the repository's real index.
     collection_name:
-        §5.3 fixes the production name at ``techdocs``; the parameter
+        section 5.3 fixes the production name at ``techdocs``; the parameter
         exists so tests and experiments can use isolated collections.
     embedder:
         Used only by :meth:`similarity_search`, to embed the query.
@@ -196,7 +196,7 @@ class ChromaIndex:
         One row per chunk: id = ``chunk_id``, text = ``content``, the
         metadata described in the module docstring. Nothing is appended —
         a re-write of an existing ``chunk_id`` overwrites it, which is
-        what makes re-ingestion converge (§5.16).
+        what makes re-ingestion converge (section 5.16).
 
         Raises
         ------
@@ -258,7 +258,7 @@ class ChromaIndex:
     ) -> list[RetrievedChunk]:
         """Return the stored chunks nearest to ``query``, closest first.
 
-        The read half of §5.3's contract: embed the query with the
+        The read half of section 5.3's contract: embed the query with the
         ``Embedder`` this index was built with, ask chroma for the
         nearest rows (optionally constrained by ``filter``), and hand
         back :class:`~app.domain.models.RetrievedChunk` records.
@@ -278,8 +278,8 @@ class ChromaIndex:
         filter:
             Metadata constraint handed to chroma as its ``where`` clause —
             ``{"doc_id": {"$in": [...]}, "section": "Requirements"}`` and
-            friends (§5.3). Only its *shape* is checked here: which keys,
-            values and operators are legal is §5.4's filter layer's rule
+            friends (section 5.3). Only its *shape* is checked here: which keys,
+            values and operators are legal is section 5.4's filter layer's rule
             to enforce, because that layer is what builds these. An empty
             mapping means no constraint.
 

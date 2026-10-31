@@ -32,7 +32,7 @@ callers still get ``ProviderRateLimitError`` or ``DependencyError``.
 
 One policy, visible
 -------------------
-The OpenAI client itself is built with ``max_retries=0`` (§5.13), so
+The OpenAI client itself is built with ``max_retries=0`` (section 5.13), so
 this module is the only place that decides to wait. Two stacked retry
 policies would multiply — three retries behind three retries means nine
 requests — and nobody could reason about the worst case.
@@ -71,7 +71,7 @@ __all__ = [
     "with_retries",
 ]
 
-#: Texts per request. §5.2's sketch suggested "e.g. 128"; large enough
+#: Texts per request. section 5.2's sketch suggested "e.g. 128"; large enough
 #: that a 1000-chunk document costs a handful of requests, small enough
 #: that a retried batch does not redo much work.
 DEFAULT_BATCH_SIZE = 128
@@ -194,7 +194,7 @@ def _log_retry(state: RetryCallState, *, what: str) -> None:
     """One warning per retry: attempt, wait, and the failure's *type*.
 
     The exception's message is deliberately left out: provider errors can
-    quote the API key they rejected (§5.13), and no redaction rule
+    quote the API key they rejected (section 5.13), and no redaction rule
     should ever have to be trusted with a credential.
     """
     outcome = state.outcome

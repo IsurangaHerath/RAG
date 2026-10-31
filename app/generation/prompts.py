@@ -1,17 +1,17 @@
-"""Prompt assembly with grounding rules (§5.5) — Stage 37 (`generation/prompts.py`).
+"""Prompt assembly with grounding rules (section 5.5) — Stage 37 (`generation/prompts.py`).
 
-Not routed (§5.6): this is a protocol definition plus a concrete
+Not routed (section 5.6): this is a protocol definition plus a concrete
 implementation (`GroundingPromptBuilder`), not an endpoint. The system
 prompt enforces the grounding contract described in `ARCHITECTURE.md`
-§5.5: answer only from `<context>`; cite `[n]` markers for every factual
+section 5.5: answer only from `<context>`; cite `[n]` markers for every factual
 claim; when the context does not contain enough evidence, reply with the
 fixed abstention phrase (`grounded=False`); never invent sources.
 
-The concrete builder takes a `GroundedContext` (§5.4 → §5.5, Stage 36) —
+The concrete builder takes a `GroundedContext` (section 5.4 → section 5.5, Stage 36) —
 which carries the citation mapping (`[1]` -> `chunk_id`), truncated chunk
 texts with provenance annotations (`filename.pdf p.12 (doc_…:17)`), and
 the budget applied (`budget_tokens`) — and produces a `list[BaseMessage]`
-that the `LLMClient.generate_messages()` (§5.5, Stage 37, `llm_client.py`)
+that the `LLMClient.generate_messages()` (section 5.5, Stage 37, `llm_client.py`)
 consumes.
 
 No live model is called in this file; the concrete `build()` only
@@ -51,7 +51,7 @@ class PromptBuilder(Protocol):
 class GroundingPromptBuilder:
     """Concrete builder: system prompt with grounding rules + context blocks.
 
-    The system message carries the rules (`ARCHITECTURE.md` §5.5): answer
+    The system message carries the rules (`ARCHITECTURE.md` section 5.5): answer
     only from the context; cite `[n]` markers; abstain when evidence is
     missing. The user message includes the question and the evidence blocks
     in provenance order (filename, page, chunk id, full passage text) — the
@@ -91,7 +91,7 @@ class GroundingPromptBuilder:
                 f"Answer based only on the context above."
             )
         else:
-            # Build context blocks in citation-marker order (§5.4 sketch:
+            # Build context blocks in citation-marker order (section 5.4 sketch:
             # filename.pdf p.12 (chunk_id) + passage text).
             ordered = sorted(ctx.citation_mapping.items())
             blocks = []

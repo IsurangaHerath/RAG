@@ -65,7 +65,7 @@ def stored_ids(index: ChromaIndex, doc_id: str) -> set[str]:
 def test_the_collection_is_the_documented_one_with_cosine_space(
     index: ChromaIndex,
 ) -> None:
-    """§5.3 fixes the name and the metric; the test pins both."""
+    """section 5.3 fixes the name and the metric; the test pins both."""
     assert index.collection.name == COLLECTION_NAME
     assert index.collection.metadata == {"hnsw:space": "cosine"}
 
@@ -118,7 +118,7 @@ def test_an_unopenable_directory_becomes_a_dependency_error(tmp_path: Path) -> N
 def test_upsert_stores_ids_text_and_the_full_metadata_schema(
     index: ChromaIndex,
 ) -> None:
-    """§5.3's schema, chunk text included — retrieval quotes it back later."""
+    """section 5.3's schema, chunk text included — retrieval quotes it back later."""
     index.upsert([chunk(0)], vectors(1))
 
     row = index.collection.get(ids=[f"{DOC_ID}:0"], include=["documents", "metadatas"])
@@ -212,7 +212,7 @@ def test_a_storage_failure_is_translated_not_leaked(
 def test_delete_document_returns_the_removed_count_and_spares_others(
     index: ChromaIndex,
 ) -> None:
-    """§5.3: the return value is what the pipeline reports as deleted."""
+    """section 5.3: the return value is what the pipeline reports as deleted."""
     index.upsert([chunk(0), chunk(1), chunk(2)], vectors(3))
     index.upsert([chunk(0, doc_id=DOC_ID_B)], vectors(1))
 
@@ -232,7 +232,7 @@ def test_deleting_an_unknown_document_removes_nothing(index: ChromaIndex) -> Non
 
 
 def test_delete_then_upsert_leaves_only_the_new_version(index: ChromaIndex) -> None:
-    """§6.1's overwrite protocol, executed against real storage."""
+    """section 6.1's overwrite protocol, executed against real storage."""
     index.upsert([chunk(0), chunk(1), chunk(2)], vectors(3))
 
     removed = index.delete_document(DOC_ID)

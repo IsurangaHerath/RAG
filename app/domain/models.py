@@ -671,7 +671,7 @@ class Chunk:
         }
 
 
-#: A metadata filter as §5.3's ``similarity_search`` accepts one: a field
+#: A metadata filter as section 5.3's ``similarity_search`` accepts one: a field
 #: name mapped to a value or an operator mapping, e.g.
 #: ``{"doc_id": {"$in": [...]}, "section": "Requirements"}``. The domain
 #: only names the *shape* — which keys and operators are legal is the
@@ -684,7 +684,7 @@ type MetadataFilter = Mapping[str, Any]
 class RetrievedChunk:
     """A chunk as a search returned it: the text, plus how close it came.
 
-    §5.3's ``similarity_search`` hands these back instead of raw store
+    section 5.3's ``similarity_search`` hands these back instead of raw store
     rows, for the same reason the rest of this module exists — a caller
     should never have to know that chroma nests its results two lists
     deep, or which metadata keys the index owns. The shape deliberately
@@ -713,7 +713,7 @@ class RetrievedChunk:
         stored vector points the same way as the query, larger means
         farther (cosine distance cannot go below zero). Converting it to
         a 0-1 score, and deciding which score is close enough, belong to
-        the retrieval layer (§5.4) — inventing a second meaning for this
+        the retrieval layer (section 5.4) — inventing a second meaning for this
         number here would leave two numbers in circulation for one
         distance.
     metadata:

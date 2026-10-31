@@ -9,7 +9,7 @@ from source kept here, where every byte is reviewable and the whole corpus
 costs a handful of lines.
 
 **Determinism is a requirement, not a nicety.** :mod:`app.ingestion`
-identifies a document by hashing its path and hashing its content (§5.1), so
+identifies a document by hashing its path and hashing its content (section 5.1), so
 regenerating a sample that differs by a single byte would make every
 re-run report the corpus as *modified* and re-index all of it. Everything
 here is therefore a fixed literal — no timestamps, no random ids — and each

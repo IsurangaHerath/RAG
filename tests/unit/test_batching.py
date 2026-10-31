@@ -161,7 +161,7 @@ def test_retry_attempts_must_be_positive() -> None:
 def test_retries_are_logged_without_the_exception_message() -> None:
     """Each retry logs attempt, wait and *type* — never provider text.
 
-    Provider messages can quote the API key they rejected (§5.13), so
+    Provider messages can quote the API key they rejected (section 5.13), so
     the log line must carry the class name only.
     """
     secret = "sk-should-never-reach-a-log"

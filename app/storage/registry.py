@@ -1,17 +1,17 @@
 """The document registry: lifecycle state and checksums in SQLite (Stage 25).
 
-§5.3 describes two independent stores: chroma holds vectors (§5.3.1),
+section 5.3 describes two independent stores: chroma holds vectors (section 5.3.1),
 and this one holds what the *document* is doing — its status, its
 checksum, and the record itself. Everything that has waited for a
 registry now has a home: the ingest service's note that "this service
-runs before any registry exists" (§5.2.2), the pipeline's in-memory
-stand-in (§5.16, which named its lookups after this Protocol on
-purpose), and §5.1's status lifecycle, whose rules live in the model but
+runs before any registry exists" (section 5.2.2), the pipeline's in-memory
+stand-in (section 5.16, which named its lookups after this Protocol on
+purpose), and section 5.1's status lifecycle, whose rules live in the model but
 had nobody to *apply* them to a stored record.
 
 Three decisions are worth spelling out.
 
-**SQLite, from the standard library.** §5.3 promises the pair can be
+**SQLite, from the standard library.** section 5.3 promises the pair can be
 swapped (SQLite → Postgres) — what matters is the Protocol, not the
 engine. sqlite3 needs no new dependency, writes to one ordinary file,
 and every test runs against a temporary directory with no server to
@@ -19,7 +19,7 @@ start. The SQL is half a page: one table, two indexes, `?` placeholders
 and nothing interpolated.
 
 **The model owns the rules; the registry owns the rows.** Transitions
-go through ``Document.with_status`` (§5.1), so the graph
+go through ``Document.with_status`` (section 5.1), so the graph
 (``pending → parsing → indexing → indexed``, ``failed`` reachable from
 anywhere, terminal states accepting nothing), the "failed needs an
 error" rule and the ``ingested_at`` stamp are all enforced in exactly
@@ -28,21 +28,21 @@ one place. The registry adds only two things the model cannot know:
 result. A registry that re-implemented the graph would be a second copy
 to drift.
 
-**``create`` replaces rather than rejects.** The §5.1 lifecycle makes
+**``create`` replaces rather than rejects.** The section 5.1 lifecycle makes
 terminal states permanent *on a record*, with the documented remedy
 that "a finished document must be re-ingested (a fresh record)".
 ``create`` is that fresh record: registering the same ``doc_id`` again
 overwrites every column, which is what lets an edited file — or a
 retry-after-crash — restart at ``pending`` instead of being stuck at
-``indexed`` or ``failed``. §6.1's 409 for a duplicate upload happens
-*before* this method, decided by deduplication (§5.2.6), not here.
+``indexed`` or ``failed``. section 6.1's 409 for a duplicate upload happens
+*before* this method, decided by deduplication (section 5.2.6), not here.
 
 ``DocumentRecord`` is a name, not a second type
 -----------------------------------------------
-§5.3's sketch returns ``DocumentRecord``; here that is a type alias for
+section 5.3's sketch returns ``DocumentRecord``; here that is a type alias for
 :class:`~app.domain.models.Document` itself, because status, error and
 ``content_sha256`` — everything a registry manages — are already fields
-of §5.1's model. A parallel record class would be a second source of
+of section 5.1's model. A parallel record class would be a second source of
 truth for the same twelve columns. The record's full text is stored
 too: every other component hands out complete ``Document`` objects, and
 a registry returning hollowed-out copies would be a different kind of
@@ -54,7 +54,7 @@ Determinism, everywhere
 -----------------------
 Every query orders by ``doc_id``: unique, stable, so paging never
 skips or repeats a row, and ``find_by_hash`` — the indexed counterpart
-of the sequence scan in :mod:`app.ingestion.deduplication` (§5.2.6),
+of the sequence scan in :mod:`app.ingestion.deduplication` (section 5.2.6),
 same name and contract on purpose — returns the same "first" match
 every time, since one hash can back several paths (a renamed copy).
 
@@ -83,17 +83,17 @@ from app.domain.models import Document, IngestStatus
 
 __all__ = ["REGISTRY_FILENAME", "DocumentRecord", "DocumentRegistry"]
 
-#: §5.3: the registry's file, next to the rest of the configured data.
+#: section 5.3: the registry's file, next to the rest of the configured data.
 REGISTRY_FILENAME: str = "registry.sqlite3"
 
-#: §5.3's return type — a persisted :class:`~app.domain.models.Document`.
+#: section 5.3's return type — a persisted :class:`~app.domain.models.Document`.
 type DocumentRecord = Document
 
 _T = TypeVar("_T")
 
 
 class DocumentRegistry:
-    """§5.3's ``DocumentRegistry`` over a SQLite file.
+    """section 5.3's ``DocumentRegistry`` over a SQLite file.
 
     Parameters
     ----------
@@ -125,12 +125,12 @@ class DocumentRegistry:
         """Where this registry's database file lives."""
         return self._path
 
-    # -- §5.3's Protocol ----------------------------------------------------
+    # -- section 5.3's Protocol ----------------------------------------------------
 
     def create(self, doc: Document) -> None:
         """Register a document, replacing any record already under its id.
 
-        The fresh-record entry point (§5.1): re-registering a finished
+        The fresh-record entry point (section 5.1): re-registering a finished
         or failed document restarts it at ``pending`` with the new
         checksum and text, which is how re-ingestion proceeds after the
         lifecycle's terminal states.
@@ -221,7 +221,7 @@ class DocumentRegistry:
         """Move a stored record to a new status, persisting the result.
 
         The transition itself is decided by ``Document.with_status``
-        (§5.1): an illegal jump raises ``invalid_status_transition``, a
+        (section 5.1): an illegal jump raises ``invalid_status_transition``, a
         move to ``failed`` without an error raises ``missing_error``, and
         ``ingested_at`` is stamped exactly when ``indexed`` is reached.
 
@@ -255,7 +255,7 @@ class DocumentRegistry:
         self._connection.commit()
 
     def find_by_hash(self, sha256: str) -> DocumentRecord | None:
-        """Return the first record holding this content hash (§5.2.6 dedup).
+        """Return the first record holding this content hash (section 5.2.6 dedup).
 
         The indexed counterpart of ``app.ingestion.deduplication.
         find_by_hash``: same name, same contract — "first" is the lowest
@@ -312,7 +312,7 @@ class DocumentRegistry:
 
     def _query_all(self, sql: str, params: tuple[object, ...]) -> builtins.list[DocumentRecord]:
         # ``builtins.`` because this class has a method called ``list``
-        # (§5.3's name), and inside the class body that shadows the type
+        # (section 5.3's name), and inside the class body that shadows the type
         # in annotations — only the *annotation* needs the qualification;
         # calls would resolve to the builtin anyway.
         rows = self._connection.execute(sql, params).fetchall()
@@ -347,7 +347,7 @@ class DocumentRegistry:
     def _run(operation: str, action: Callable[[], _T]) -> _T:
         """Run one sqlite call, translating its failures into our errors.
 
-        Same policy as §5.3.1's index: the engine's exceptions are
+        Same policy as section 5.3.1's index: the engine's exceptions are
         infrastructure trouble to a caller (``DependencyError``, 502)
         with the original message kept in ``detail`` only. Our own
         ``RAGError``s — NotFound, the model's ValidationError — pass

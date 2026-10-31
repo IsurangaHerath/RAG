@@ -1,4 +1,4 @@
-"""Tests for the answer-side domain models (§5.1, §5.5).
+"""Tests for the answer-side domain models (section 5.1, section 5.5).
 
 `Citation` and `Answer` are the records the API will return, so these
 tests pin the properties that make them trustworthy: a citation always

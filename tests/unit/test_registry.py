@@ -8,7 +8,7 @@ status graph enforced *through* ``Document.with_status`` rather than
 beside it, deterministic ``find_by_hash`` when one hash backs several
 paths, and sqlite's failures arriving as ``DependencyError``. The last
 test seeds an ``IngestPipeline`` from a real registry, closing the loop
-§5.16 left open.
+section 5.16 left open.
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def test_create_then_get_returns_the_same_document(
 def test_getting_an_unknown_document_returns_none(
     registry: DocumentRegistry,
 ) -> None:
-    """Absence is ``None``, not an exception — §5.3's signature says so."""
+    """Absence is ``None``, not an exception — section 5.3's signature says so."""
     assert registry.get("doc_0000000000000000") is None
 
 
@@ -104,7 +104,7 @@ def test_registering_the_same_id_replaces_every_column(
 def test_a_terminal_record_can_be_restarted_by_a_fresh_registration(
     registry: DocumentRegistry,
 ) -> None:
-    """§5.1's remedy for terminal states: re-ingest as a fresh record."""
+    """section 5.1's remedy for terminal states: re-ingest as a fresh record."""
     doc = make_document()
     registry.create(doc)
     registry.update_status(doc.doc_id, IngestStatus.PARSING)
@@ -331,7 +331,7 @@ class CountingEmbedder:
 def test_a_pipeline_seeded_from_the_registry_skips_unchanged_files(
     tmp_path: Path,
 ) -> None:
-    """§5.16's stand-in list replaced by the real thing: no embed, no write."""
+    """section 5.16's stand-in list replaced by the real thing: no embed, no write."""
     source = tmp_path / "api-spec.md"
     source.write_text(TEXT_A, encoding="utf-8")
     doc = make_document(content=TEXT_A)

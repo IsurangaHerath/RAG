@@ -1,4 +1,4 @@
-"""Tests for chunking: the ``Chunk`` record (§5.1) and the chunker (§5.2).
+"""Tests for chunking: the ``Chunk`` record (section 5.1) and the chunker (section 5.2).
 
 The properties that matter, in the order they matter:
 
@@ -485,7 +485,7 @@ def test_an_empty_heading_with_no_descendant_keeps_its_own_section(
 # PDFs and pages
 # ---------------------------------------------------------------------------
 def test_every_pdf_chunk_names_the_page_it_came_from(tmp_path: Path) -> None:
-    """The positional guarantee §5.2.3 exists for."""
+    """The positional guarantee section 5.2.3 exists for."""
     pages = [
         "Chapter one begins here. " + "Sentence. " * 30,
         "Chapter two starts here. " + "Sentence. " * 30,
@@ -515,7 +515,7 @@ def test_a_page_longer_than_the_limit_still_produces_several_chunks(
 
 
 def test_a_pdf_without_a_text_layer_yields_no_chunks(tmp_path: Path) -> None:
-    """A scan is not an error; §5.2.5 marks it skipped before it gets here."""
+    """A scan is not an error; section 5.2.5 marks it skipped before it gets here."""
     path = tmp_path / "scan.pdf"
     path.write_bytes(build_blank_pdf(2))
     document = load_pdf(path)
@@ -524,7 +524,7 @@ def test_a_pdf_without_a_text_layer_yields_no_chunks(tmp_path: Path) -> None:
 
 
 def test_pdf_chunks_carry_filename_and_media_type(tmp_path: Path) -> None:
-    """The two keys §5.3 lists for every chunk, whatever the source."""
+    """The two keys section 5.3 lists for every chunk, whatever the source."""
     document = _pdf_document(tmp_path, ["Some page text."])
 
     chunks = RecursiveChunker().split(document, doc_id=DOC_ID)

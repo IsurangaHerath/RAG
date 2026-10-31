@@ -1,8 +1,8 @@
-"""Tests for the retrieval layer's retriever (§5.4, Stage 31).
+"""Tests for the retrieval layer's retriever (section 5.4, Stage 31).
 
 The retriever combines three stages in one module: embed the query
 (`Embedder.embed_query`), fetch nearest from `ChromaIndex.similarity_search`
-(Stage 30), then apply MMR (Maximal Marginal Relevance, §5.4) diversity
+(Stage 30), then apply MMR (Maximal Marginal Relevance, section 5.4) diversity
 so the evidence set covers more of the corpus than pure nearest-neighbour
 would. No network, no live API key: `FakeEmbedder` provides the vectors,
 real `ChromaIndex` provides the persistence.

@@ -1,4 +1,4 @@
-"""Tests for validated metadata filtering (§5.4, Stage 33 — filters).
+"""Tests for validated metadata filtering (section 5.4, Stage 33 — filters).
 
 The `FilterValidator` enforces the `where` clause shape before it reaches
 chroma (`retrieval/retriever.py` forwards unvalidated; this layer validates

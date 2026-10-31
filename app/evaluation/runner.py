@@ -1,4 +1,4 @@
-"""Experiment runner (Â§5.8, Stages 45â€“52).
+"""Experiment runner (Âsection 5.8, Stages 45â€“52).
 
 Reads a golden ``dataset.jsonl`` (one line per evaluated query), runs
 each query through the retrieval layer, writes the metrics to a

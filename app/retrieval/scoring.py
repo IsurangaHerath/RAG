@@ -1,10 +1,10 @@
-"""Distance to score conversion (§5.4, Stage 32) — justified.
+"""Distance to score conversion (section 5.4, Stage 32) — justified.
 
 `similarity_search` (Stage 30) returns `RetrievedChunk.distance` as a
 **raw cosine distance**: 0.0 when the stored vector points exactly the
 same way as the query, 2.0 when it points the opposite way, and anything
 between for the angles in between. That number travels unconverted through
-the retrieval chain (§5.3.5's docstring, `retriever.py` line 17) — the
+the retrieval chain (section 5.3.5's docstring, `retriever.py` line 17) — the
 retriever's MMR diversity uses cosine *similarity* (1 - distance) locally,
 but never writes a second number back; conversion to a single normalized
 score is this file's one job.
@@ -45,7 +45,7 @@ class ScoreConverter:
     """Convert a raw cosine distance (`RetrievedChunk.distance`) to a score.
 
     The conversion is a single linear rescale against the fixed range
-    [0, 2] (§5.4 notes the justification: cosine distance has a provable
+    [0, 2] (section 5.4 notes the justification: cosine distance has a provable
     maximum of 2 for opposite-direction unit vectors). It is deliberately
     not configurable — changing the mapping would break the contract that
     one distance has one score, and any calibration should happen at the
@@ -74,7 +74,7 @@ class ScoreConverter:
                 f"distance {distance!r} exceeds the cosine-distance ceiling ({COSINE_DISTANCE_MAX})"
             )
         # Linear rescale to [0, 1]: opposite directions become 0, same
-        # direction becomes 1. Justified by the fixed [0, 2] range (§5.4).
+        # direction becomes 1. Justified by the fixed [0, 2] range (section 5.4).
         score = 1.0 - (distance / COSINE_DISTANCE_MAX)
         return max(0.0, min(1.0, score))
 

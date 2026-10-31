@@ -1,4 +1,4 @@
-"""Tests for the API contract layer (§5.6, 53-57).
+"""Tests for the API contract layer (section 5.6, 53-57).
 
 These are transport-level tests: they prove Pydantic validation rejects
 bad input (`empty_embedding_input` mapped to `400`), that schemas match

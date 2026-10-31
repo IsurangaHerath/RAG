@@ -1,4 +1,4 @@
-"""Pydantic request/response contracts (§5.6, Stage 43, 53-57).
+"""Pydantic request/response contracts (section 5.6, Stage 43, 53-57).
 
 These schemas are framework-independent from the domain layer: `Answer`
 (lives in `domain/models.py`) is converted to/from `AnswerResponse`
@@ -8,7 +8,7 @@ pipeline, and the domain can change its fields without breaking clients.
 Redaction is preserved: `AnswerResponse` never carries the full chunk
 content (`sources` only lists chunk ids and filenames, not text), and
 `QueryRequest` never logs the user's question beyond the standard access
-log line (`observability/logging.py`, §5.9).
+log line (`observability/logging.py`, section 5.9).
 
 No live model is called by this module; it only validates and serialises.
 """
@@ -27,7 +27,7 @@ __all__ = [
 
 
 class QueryRequest(BaseModel):
-    """POST `/v1/query` body (§5.6, `routes/query.py`)."""
+    """POST `/v1/query` body (section 5.6, `routes/query.py`)."""
 
     question: str = Field(..., min_length=1, max_length=4000)
     doc_ids: list[str] | None = None
@@ -44,7 +44,7 @@ class QueryRequest(BaseModel):
 
 
 class CitationResponse(BaseModel):
-    """A resolved ``[n]`` citation (§5.1, `domain/models.Citation`)."""
+    """A resolved ``[n]`` citation (section 5.1, `domain/models.Citation`)."""
 
     marker: int
     chunk_id: str
@@ -55,7 +55,7 @@ class CitationResponse(BaseModel):
 
 
 class SourceResponse(BaseModel):
-    """A cited passage (§5.5, redacted preview, no full chunk text)."""
+    """A cited passage (section 5.5, redacted preview, no full chunk text)."""
 
     chunk_id: str
     doc_id: str
@@ -66,7 +66,7 @@ class SourceResponse(BaseModel):
 
 
 class AnswerResponse(BaseModel):
-    """POST `/v1/query` response (§5.6, `routes/query.py`)."""
+    """POST `/v1/query` response (section 5.6, `routes/query.py`)."""
 
     query: str
     text: str
@@ -78,7 +78,7 @@ class AnswerResponse(BaseModel):
 
 
 class DocumentStatusResponse(BaseModel):
-    """GET `/v1/documents/{id}` response (§5.6, `routes/documents.py`)."""
+    """GET `/v1/documents/{id}` response (section 5.6, `routes/documents.py`)."""
 
     doc_id: str
     filename: str
@@ -95,13 +95,13 @@ class DocumentListResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """GET `/healthz` (§5.6)."""
+    """GET `/healthz` (section 5.6)."""
 
     status: str = "ok"
 
 
 class ReadyResponse(BaseModel):
-    """GET `/readyz` (§5.6); checks Chroma and OpenAI reachability."""
+    """GET `/readyz` (section 5.6); checks Chroma and OpenAI reachability."""
 
     status: str
     chroma: str

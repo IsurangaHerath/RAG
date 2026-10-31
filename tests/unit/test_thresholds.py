@@ -1,4 +1,4 @@
-"""Tests for optional score threshold (§5.4, Stage 34 — thresholds).
+"""Tests for optional score threshold (section 5.4, Stage 34 — thresholds).
 
 The threshold operates on the converted score (`scoring.py`, Stage 32),
 never on raw distance — mixing the two meanings (distance 0 is best,

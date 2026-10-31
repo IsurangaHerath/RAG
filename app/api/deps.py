@@ -1,4 +1,4 @@
-"""Dependency providers (§5.6, `api/deps.py`).
+"""Dependency providers (section 5.6, `api/deps.py`).
 
 These are FastAPI `Depends()` factories that inject the shared
 components (`ChromaIndex`, `LLMClient`) without creating them per

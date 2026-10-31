@@ -1,12 +1,12 @@
-"""Retrieval and answer-quality metrics (Â§5.8, Stages 45â€“52).
+"""Retrieval and answer-quality metrics (Âsection 5.8, Stages 45â€“52).
 
 Every metric is a pure function over a result set: no model call, no
 network, no state mutation. That keeps the evaluation harness reproducible
 and safe to run in CI without a `OPENAI_API_KEY`. The methods here cover
-the family described in ARCHITECTURE.md Â§5.8:
+the family described in ARCHITECTURE.md Âsection 5.8:
 
 * **Precision@k / Recall@k / F1@k** â€” the standard binary-relevance set
-  family; `recall_at_k` is the retrieval contract (Â§5.4) that the index
+  family; `recall_at_k` is the retrieval contract (Âsection 5.4) that the index
   must satisfy.
 * **MRR (Mean Reciprocal Rank)** â€” rank-aware: the first relevant chunk's
   position is what a user scanning a cited list actually cares about.
@@ -49,7 +49,7 @@ def _relevant_ids(expected: Collection[str], k: int | None = None) -> set[str]:
     return {str(item) for item in expected}
 
 
-#: The binary-relevance family (Â§5.8): precision, recall, F1 at a fixed cut-off.
+#: The binary-relevance family (Âsection 5.8): precision, recall, F1 at a fixed cut-off.
 
 
 def precision_at_k(
@@ -110,7 +110,7 @@ def f1_at_k(
     return 2.0 * p * r / (p + r)
 
 
-#: Rank-aware metrics (Â§5.8).
+#: Rank-aware metrics (Âsection 5.8).
 
 
 def mean_reciprocal_rank(

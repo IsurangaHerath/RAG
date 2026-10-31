@@ -411,7 +411,7 @@ def test_a_load_failure_leaves_a_finished_row_and_its_chunks_untouched(
     outcome = by_path(second)["guide.md"]
 
     assert outcome.is_failed
-    # A terminal row cannot be nudged (§5.1); the failure is reported
+    # A terminal row cannot be nudged (section 5.1); the failure is reported
     # through the outcome instead, and the old chunks stay retrievable.
     assert outcome.status is IngestStatus.INDEXED
     row = registry.get(doc_id)

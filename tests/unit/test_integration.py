@@ -1,11 +1,11 @@
-"""Integration: retrieval wired into the query pipeline (§6.2, Stage 36).
+"""Integration: retrieval wired into the query pipeline (section 6.2, Stage 36).
 
-The architecture's data flow (§6.2) is: query → `QueryAnalyzer.analyze`
+The architecture's data flow (section 6.2) is: query → `QueryAnalyzer.analyze`
 (optional) → `Embedder.embed_query` → `Retriever.retrieve` (Stage 31,
 with MMR) → `ContextBuilder.build` (Stage 36) → `PromptBuilder.build`
 (Stage 37+). This file proves the middle half — retrieval produces
 `GroundedContext` that carries provenance, citation mapping, and budget
-state — without reaching the LLM layer (§5.5 stays out of scope for
+state — without reaching the LLM layer (section 5.5 stays out of scope for
 Stage 36).
 
 No network, no live model: `FakeEmbedder` serves embeddings, real

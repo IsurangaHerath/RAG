@@ -1,17 +1,17 @@
 """Top-k retrieval with MMR diversity — Stage 31.
 
-The `Retriever` protocol (§5.4) turns a `RetrievalQuery` (the output of the
+The `Retriever` protocol (section 5.4) turns a `RetrievalQuery` (the output of the
 optional `QueryAnalyzer`) into the *smallest sufficient* evidence set.
 Three steps, all inside this file:
 
 1. **Embed.** The query is embedded with the same `Embedder` the index
-   holds (§5.3.5) so document and query vectors live in the same space —
+   holds (section 5.3.5) so document and query vectors live in the same space —
    the property `test_embedder_contract` enforces.
 2. **Fetch.** `ChromaIndex.similarity_search` (Stage 30) gives the nearest
-   chunks, with an optional `filter` (§5.4's query-time constraint, not
+   chunks, with an optional `filter` (section 5.4's query-time constraint, not
    validated here — `filters.py`, Stage 33 enforces operator/value rules).
 3. **MMR.** The nearest results tend to cluster around the same passage;
-   Maximal Marginal Relevance (§5.4, Stage 31) trades a small amount of
+   Maximal Marginal Relevance (section 5.4, Stage 31) trades a small amount of
    relevance for diversity so the evidence set covers more of the corpus.
 
 MMR uses cosine similarity (1 - cosine distance) both for relevance
@@ -46,7 +46,7 @@ from app.storage.chroma import ChromaIndex
 
 __all__ = ["MMR_LAMBDA", "RetrievalQuery", "Retriever"]
 
-#: Default MMR relevance-diversity balance (§5.4).
+#: Default MMR relevance-diversity balance (section 5.4).
 MMR_LAMBDA = 0.7
 
 
@@ -55,7 +55,7 @@ class RetrievalQuery:
     """The input to :class:`Retriever` — a standalone question plus a filter.
 
     The optional `filter` (a `MetadataFilter`, the alias from the domain)
-    is applied at query time against the index (§5.4), not validated here —
+    is applied at query time against the index (section 5.4), not validated here —
     `filters.py` (Stage 33) enforces which operators and value types are
     legal; this layer only passes it through.
 
@@ -90,7 +90,7 @@ class RetrievalQuery:
 
 
 class Retriever(Protocol):
-    """Fetch the smallest sufficient evidence set (§5.4).
+    """Fetch the smallest sufficient evidence set (section 5.4).
 
     A concrete retriever (below) holds the `ChromaIndex` and `Embedder`
     needed to run the three-step path; the Protocol only declares the
@@ -107,7 +107,7 @@ class Retriever(Protocol):
 
 
 class MMRRetriever:
-    """Concrete retriever: embed → chroma top-k → MMR diversity (§5.4).
+    """Concrete retriever: embed → chroma top-k → MMR diversity (section 5.4).
 
     The ``Embedder`` is held at construction time (the same instance the
     index writes through, so query and document embeddings share a space);
@@ -120,11 +120,11 @@ class MMRRetriever:
     Parameters
     ----------
     index:
-        The vector store to search (§5.3.5). Must have been constructed
+        The vector store to search (section 5.3.5). Must have been constructed
         with an ``embedder`` (``ConfigurationError`` ``embedder_not_configured``
         if missing — a wiring mistake, not a storage failure).
     embedder:
-        The embedder shared with the index (§5.3.5's read path). Used only
+        The embedder shared with the index (section 5.3.5's read path). Used only
         to embed the query text into the same space as the stored chunks.
     """
 
@@ -158,13 +158,13 @@ class MMRRetriever:
                 f"MMR lambda must be in [0, 1], got {lambda_diversity!r}",
                 code="invalid_request",
             )
-        # Step 1: fetch nearest from storage (§5.3.5).
+        # Step 1: fetch nearest from storage (section 5.3.5).
         nearest = self._index.similarity_search(
             rq.query,
             k=max(k, 1),
             filter=rq.filter,
         )
-        # Step 2: MMR diversity selection (§5.4).
+        # Step 2: MMR diversity selection (section 5.4).
         selected = self._mmr_select(nearest, k=k, lambda_diversity=lambda_diversity)
         return selected
 
@@ -174,11 +174,11 @@ class MMRRetriever:
         k: int,
         lambda_diversity: float,
     ) -> list[RetrievedChunk]:
-        """Select ``k`` chunks with maximal marginal relevance (§5.4).
+        """Select ``k`` chunks with maximal marginal relevance (section 5.4).
 
         Relevance: cosine similarity to the query (1 - distance). The
-        distance travels raw from the index (§5.3.5); converting it to
-        a score is the scoring layer's job (§5.4, `scoring.py`, Stage 32),
+        distance travels raw from the index (section 5.3.5); converting it to
+        a score is the scoring layer's job (section 5.4, `scoring.py`, Stage 32),
         so this layer converts it locally for the MMR formula and only
         here, never writing a second number back.
 

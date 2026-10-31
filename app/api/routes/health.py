@@ -1,10 +1,10 @@
-"""Health and readiness endpoints (§5.6, `routes/health.py`).
+"""Health and readiness endpoints (section 5.6, `routes/health.py`).
 
 `/healthz` is a liveness check — the process is running.
 `/readyz` checks that the two dependencies (`ChromaIndex`, `LLMClient`)
 are configured. A missing `OPENAI_API_KEY` makes `LLMClient` unavailable,
 so readiness fails with `503`; the health endpoint stays `200` because
-liveness does not require external connectivity (§5.6, architecture).
+liveness does not require external connectivity (section 5.6, architecture).
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ router = APIRouter(tags=["health"])
 
 @router.get("/healthz", response_model=HealthResponse)
 async def healthz() -> HealthResponse:
-    """Liveness: the process is alive (§5.6)."""
+    """Liveness: the process is alive (section 5.6)."""
     return HealthResponse(status="ok")
 
 
@@ -29,7 +29,7 @@ async def readyz(
     index=Depends(get_chroma_index),
     llm_client=Depends(get_llm_client),
 ) -> ReadyResponse:
-    """Readiness: Chroma index and LLM adapter are configured (§5.6).
+    """Readiness: Chroma index and LLM adapter are configured (section 5.6).
 
     A missing `OPENAI_API_KEY` makes the LLM adapter unavailable,
     which surfaces as `openai: unavailable` rather than `500`, so a load

@@ -1,4 +1,4 @@
-"""Tests for grounded prompt assembly (§5.5).
+"""Tests for grounded prompt assembly (section 5.5).
 
 The prompt is where the grounding contract becomes instructions. These
 tests pin the two things that are easy to get subtly wrong: the model must

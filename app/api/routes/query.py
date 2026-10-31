@@ -1,4 +1,4 @@
-"""Query endpoint (§5.6, `routes/query.py`).
+"""Query endpoint (section 5.6, `routes/query.py`).
 
 POST `/v1/query` receives a `QueryRequest`, runs the pipeline through
 `GroundedAnswerPipeline.answer()`, and returns an `AnswerResponse`. If
@@ -31,7 +31,7 @@ async def query_endpoint(
     index=Depends(get_chroma_index),
     llm_client=Depends(get_llm_client),
 ) -> Any:
-    """Run the grounded query pipeline (§6.2) and return a verified `Answer`."""
+    """Run the grounded query pipeline (section 6.2) and return a verified `Answer`."""
     pipeline = GroundedAnswerPipeline(index=index, llm_client=llm_client)
     try:
         answer = pipeline.answer(

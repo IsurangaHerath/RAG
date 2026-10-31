@@ -1,6 +1,6 @@
 # Technical Document Intelligence — RAG
 
-> **Status: API transport layer started (§5.6) — Pydantic schemas, query/health routes, dependency providers; streaming response (next), evaluation regression gate (pending thresholds), and Docker deploy remain.** Storage (§5.3), retrieval (§5.4), citation parsing/verification (§5.5), evaluation package (§5.8), query pipeline (§6.2) and streaming (§5.5) are implemented and tested offline. The live LLM adapter works (stubbed); no real OpenAI call is made by the suite.
+> **Status: API transport layer started (section 5.6) — Pydantic schemas, query/health routes, dependency providers; streaming response (next), evaluation regression gate (pending thresholds), and Docker deploy remain.** Storage (section 5.3), retrieval (section 5.4), citation parsing/verification (section 5.5), evaluation package (section 5.8), query pipeline (section 6.2) and streaming (section 5.5) are implemented and tested offline. The live LLM adapter works (stubbed); no real OpenAI call is made by the suite.
 > **1178 tests passing** (0 failures, all offline — 28 new since last sync).
 > See [Project status](#project-status) for exactly what does and does not work.
 
@@ -160,10 +160,10 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 - ✅ The file store: one directory per document under the configured
   data root, byte-exact saves that replace atomically (a failed write
   leaves the previous file and no `.part` debris), `doc_id`s validated
-  as §5.1's format before they ever become a path — and a stored file
+  as section 5.1's format before they ever become a path — and a stored file
   fed straight into the ingest pipeline, the `doc_id` → bytes → chunks
   leg of the upload flow
-- ✅ A storage contract that pins §5.3's rules to runnable suites: each
+- ✅ A storage contract that pins section 5.3's rules to runnable suites: each
   registered vector index, document registry and file store implementation
   is parametrized over the same expectations — upserts replace rather than
   append, deletes report the chunk count they removed, unknown ids miss
@@ -193,7 +193,7 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 - ✅ The retrieval layer: MMR diversity selection over `RetrievalQuery`,
   distance-to-score conversion, validated metadata filters, an optional
   score threshold, and a developer-only inspector — plus the integration
-  that turns retrieval results into a `GroundedContext` (§6.2)
+  that turns retrieval results into a `GroundedContext` (section 6.2)
 - ✅ Grounded-generation building blocks: prompt assembly with `[n]`
   citation rules and the fixed abstention phrase, a lazy `ChatOpenAI`
   adapter that checks the key before constructing a client, and
@@ -380,7 +380,7 @@ Development follows 60 numbered stages grouped into 10 phases:
 | 9 | 58–59 | Docker and reproducible deployment |
 | 10 | 60 | final validation and release |
 
-Each stage is pushed as its own commit. See [`ARCHITECTURE.md` §13](ARCHITECTURE.md)
+Each stage is pushed as its own commit. See [`ARCHITECTURE.md` Section13](ARCHITECTURE.md)
 for the implementation order.
 
 ## License

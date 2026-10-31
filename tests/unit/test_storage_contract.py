@@ -1,6 +1,6 @@
 """The storage contract: rules every storage implementation must satisfy.
 
-§5.3's slice, made checkable. Contract tests run against *every*
+section 5.3's slice, made checkable. Contract tests run against *every*
 implementation registered in ``STORAGE_VECTOR_INDEXES``,
 ``STORAGE_DOCUMENT_REGISTRIES`` and ``STORAGE_FILE_STORES``: the Chroma
 write path, the SQLite document registry and the local-disk file store
@@ -8,7 +8,7 @@ today, and — once a second implementation joins — a pgvector index, a
 Postgres registry or an object-store file store, each by adding one
 factory to its registry. The rules below are what "joining" must satisfy.
 
-**Cross-store legs** close the loop the slice exists for (§6.1): bytes
+**Cross-store legs** close the loop the slice exists for (section 6.1): bytes
 saved by the file store are ingested through the real pipeline into the
 real vector index, while the registry is the state that ties the two
 together.
@@ -17,7 +17,7 @@ The vector contract starts as the full picture — ``similarity_search`` with
 its ``MetadataFilter``, returning ``RetrievedChunk`` — since Stage 30
 landed it; the write half (``upsert``, ``delete_document``, ``count``) is
 still covered by the tests that exercise it. All three registries work
-together in the cross-store legs (§6.1).
+together in the cross-store legs (section 6.1).
 
 No network here — real Chroma on a temporary directory, real SQLite on a
 temporary file, real bytes on a temporary root; the embedder is the
@@ -122,7 +122,7 @@ def make_document(source_path: str = SOURCE_PATH, content: str = TEXT) -> Docume
     )
 
 
-# --- VectorIndex contract: the write half (§5.3.1) ----------------------------
+# --- VectorIndex contract: the write half (section 5.3.1) ----------------------------
 
 
 def test_upsert_stores_one_vector_per_chunk_and_counts_them(
@@ -147,7 +147,7 @@ def test_upserting_the_same_chunk_twice_replaces_instead_of_duplicating(
 def test_delete_document_removes_exactly_its_chunks_and_returns_the_count(
     vector_index: ChromaIndex,
 ) -> None:
-    """§5.3: the return value is the number of chunks the document owned."""
+    """section 5.3: the return value is the number of chunks the document owned."""
     vector_index.upsert([chunk(0), chunk(1)], vectors(2))
     vector_index.upsert([chunk(0, doc_id=DOC_ID_B)], vectors(1))
 
@@ -166,7 +166,7 @@ def test_deleting_a_document_that_was_never_written_removes_nothing(
     assert vector_index.count() == 1
 
 
-# --- DocumentRegistry contract (§5.3.2) --------------------------------------
+# --- DocumentRegistry contract (section 5.3.2) --------------------------------------
 
 
 def test_create_then_get_round_trips_the_document(
@@ -186,7 +186,7 @@ def test_create_then_get_round_trips_the_document(
 def test_getting_an_unknown_document_returns_none(
     document_registry: DocumentRegistry,
 ) -> None:
-    """Absence is ``None``, not an exception — §5.3's signature says so."""
+    """Absence is ``None``, not an exception — section 5.3's signature says so."""
     assert document_registry.get("doc_0000000000000000") is None
 
 
@@ -260,7 +260,7 @@ def test_update_status_of_an_unknown_document_raises_not_found(
     assert excinfo.value.code == "not_found"
 
 
-# --- FileStore contract (§5.3.3) ---------------------------------------------
+# --- FileStore contract (section 5.3.3) ---------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -271,7 +271,7 @@ def test_update_status_of_an_unknown_document_raises_not_found(
 def test_ids_outside_the_document_id_format_are_rejected_without_any_io(
     file_store: FileStore, bad_id: str
 ) -> None:
-    """§5.1's format: an id that would escape the uploads root is refused."""
+    """section 5.1's format: an id that would escape the uploads root is refused."""
     with pytest.raises(ValidationError) as excinfo:
         file_store.path_for(bad_id)
     assert excinfo.value.code == "invalid_request"
@@ -282,7 +282,7 @@ def test_ids_outside_the_document_id_format_are_rejected_without_any_io(
 
 
 def test_an_unopenable_root_becomes_a_dependency_error(tmp_path: Path) -> None:
-    """§5.3's error policy: OS-level trouble is a dependency error, not a crash."""
+    """section 5.3's error policy: OS-level trouble is a dependency error, not a crash."""
     blocker = tmp_path / "not_a_directory"
     blocker.write_text("occupied", encoding="utf-8")
     store = FileStore(root=blocker)
@@ -298,7 +298,7 @@ def test_an_unopenable_root_becomes_a_dependency_error(tmp_path: Path) -> None:
 
 
 def test_save_then_path_for_returns_the_stored_bytes(file_store: FileStore) -> None:
-    """§5.3.3: bytes in, bytes out — binary payloads included, verbatim."""
+    """section 5.3.3: bytes in, bytes out — binary payloads included, verbatim."""
     payload = b"\x00\xff caf\xc3\xa9 \x1b[0m\n"
 
     with io.BytesIO(payload) as stream:
@@ -309,7 +309,7 @@ def test_save_then_path_for_returns_the_stored_bytes(file_store: FileStore) -> N
 
 
 def test_saving_twice_replaces_the_bytes_and_leaves_no_debris(file_store: FileStore) -> None:
-    """Re-upload overwrites (§5.2); the staging file never lingers."""
+    """Re-upload overwrites (section 5.2); the staging file never lingers."""
     with io.BytesIO(b"first draft") as stream:
         file_store.save(stream, doc_id=DOC_ID)
     with io.BytesIO(b"final draft") as stream:
@@ -327,7 +327,7 @@ def test_path_for_is_pure_and_creates_nothing(file_store: FileStore) -> None:
     assert not file_store.root.exists(), "asking where a file is must not create it"
 
 
-# --- Cross-store legs (§6.1) --------------------------------------------------
+# --- Cross-store legs (section 6.1) --------------------------------------------------
 
 
 class FailingEmbedder:
@@ -347,7 +347,7 @@ class FailingEmbedder:
 def test_an_upload_saved_by_the_store_is_indexed_and_reported_by_the_registry(
     tmp_path: Path,
 ) -> None:
-    """§6.1's worker leg, through real storage: save → index → status."""
+    """section 6.1's worker leg, through real storage: save → index → status."""
     store = FileStore(root=tmp_path / UPLOADS_DIRNAME)
     source_path = SOURCE_PATH
     text = TEXT
@@ -368,7 +368,7 @@ def test_an_upload_saved_by_the_store_is_indexed_and_reported_by_the_registry(
     assert result.doc_id == doc_id
     assert index.count() == result.chunk_count
 
-    # The pipeline does not drive status (§5.16 left that to the registry's
+    # The pipeline does not drive status (section 5.16 left that to the registry's
     # owner); the worker leg walks the lifecycle the model allows.
     for status in (IngestStatus.PARSING, IngestStatus.INDEXING, IngestStatus.INDEXED):
         registry.update_status(doc_id, status)
@@ -387,7 +387,7 @@ def test_an_upload_saved_by_the_store_is_indexed_and_reported_by_the_registry(
 
 
 def test_a_failed_ingest_leaves_no_chunks_and_no_indexed_status_behind(tmp_path: Path) -> None:
-    """§6.1: a failure leaves no half-written state behind, ever."""
+    """section 6.1: a failure leaves no half-written state behind, ever."""
     store = FileStore(root=tmp_path / UPLOADS_DIRNAME)
     source_path = SOURCE_PATH
     text = TEXT

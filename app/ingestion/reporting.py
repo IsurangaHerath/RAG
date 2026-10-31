@@ -18,7 +18,7 @@ and never becomes a second source of truth. Rebuilding it after every change
 to a batch costs nothing and removes the question of which copy is current.
 
 The same reasoning produces a second, smaller artefact: the **index
-report**, derived from §5.17's ``IndexResult``. Its counts answer a write
+report**, derived from section 5.17's ``IndexResult``. Its counts answer a write
 pass's question — created, replaced, chunks written — while its groupings
 come from exactly the same ``CodeTally`` buckets, so a reader who learned
 the ingest report reads this one without a legend.
@@ -30,7 +30,7 @@ What it adds beyond the counts
   ``code``, ordered by frequency, each carrying the paths that produced it.
 * **Bytes read** — an ingest's cost driver, which no count conveys.
 * Optional **deduplication tallies** — how many files were new, unchanged,
-  modified or renamed (§5.2.6), the answer to *"did this run actually
+  modified or renamed (section 5.2.6), the answer to *"did this run actually
   change anything?"* Supplied by the caller rather than computed here,
   because content hashing needs bytes this module never opens.
 * A human-readable :meth:`IngestReport.render` for terminals and sample
@@ -224,7 +224,7 @@ class IngestReport:
 class IndexReport:
     """The indexing pass reduced to the figures a report needs.
 
-    The pass of §5.17 *writes*, so its report counts writes: how many
+    The pass of section 5.17 *writes*, so its report counts writes: how many
     documents were created, how many replaced, and how many chunks
     actually reached the store — figures an ingest report cannot have,
     because loading a file says nothing about the index.

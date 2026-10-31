@@ -1,4 +1,4 @@
-"""Streaming response path (§5.5, streaming stage).
+"""Streaming response path (section 5.5, streaming stage).
 
 Streaming is a transport contract: the adapter yields text chunks, the
 pipeline forwards them without blocking for the full answer, and the

@@ -1,4 +1,4 @@
-"""Tests for the `ChatOpenAI` adapter (§5.5, §5.15).
+"""Tests for the `ChatOpenAI` adapter (section 5.5, section 5.15).
 
 No network: the delegate is either a stub or a fake constructor, so these
 tests exercise argument forwarding, response shaping and the translation of

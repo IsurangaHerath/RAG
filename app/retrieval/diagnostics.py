@@ -1,10 +1,10 @@
-"""Dev-only retrieval inspector — not routed (§5.4, Stage 35 — diagnostics).
+"""Dev-only retrieval inspector — not routed (section 5.4, Stage 35 — diagnostics).
 
 Not an API endpoint, not wired into `retriever.py`, not called by any
 pipeline stage. A debugging and demonstration tool: given a query, a
 `ChromaIndex` and an optional `filter`, it prints (or returns) the
 retrieval result as a human-readable breakdown — chunk provenance,
-raw cosine distance (§5.3.5), converted score (`scoring.py`, Stage 32),
+raw cosine distance (section 5.3.5), converted score (`scoring.py`, Stage 32),
 metadata, and which MMR step selected it (`retriever.py`, Stage 31) —
 so a developer can see why a particular chunk won and whether a missing
 result is a retrieval problem (bad query embedding, too-restrictive
@@ -15,7 +15,7 @@ The output is typed (`RetrievalInspection`) and serializable (JSON-safe),
 because it may be written to a sample output file, committed alongside a
 corpus, or compared in an evaluation harness — never to a production log,
 because `similarity_search` results contain document text (`content`),
-which must not reach logs unredacted (§5.9).
+which must not reach logs unredacted (section 5.9).
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ class ChunkInspection:
     """One retrieved chunk as it appears in an inspection report.
 
     Carries provenance (ids, file name, page/section when present), the
-    raw distance (§5.3.5), the converted score (`scoring.py`, Stage 32),
+    raw distance (section 5.3.5), the converted score (`scoring.py`, Stage 32),
     a truncated content preview (never full text), and the filter that
     narrowed the result set. Immutable: inspection results are shared
     across threads without mutation risk.
@@ -106,16 +106,16 @@ def inspect_retrieval(
     """Inspect what a query would retrieve — dev/debug only, not routed.
 
     Builds a `RetrievalQuery`, validates the filter (if any) via the same
-    `FilterValidator` that the retrieval layer uses (§5.4, Stage 33),
+    `FilterValidator` that the retrieval layer uses (section 5.4, Stage 33),
     runs `MMRRetriever.retrieve`, and packages the result as an
     `RetrievalInspection`. The function never modifies the index, never
     writes to storage, and never calls a live model — it uses the embedder
-    held by the index (§5.3.5, Stage 30), which is the offline `FakeEmbedder`
+    held by the index (section 5.3.5, Stage 30), which is the offline `FakeEmbedder`
     in tests and the real adapter in production.
 
     The `content_preview` is truncated (default 200 chars) so inspection
     output — which may be written to a file or committed — never becomes
-    a second unredacted copy of the full corpus (§5.9).
+    a second unredacted copy of the full corpus (section 5.9).
 
     Raises
     ------
@@ -127,10 +127,10 @@ def inspect_retrieval(
     ValueError
         The MMR lambda is outside [0, 1] or `k` is not `>= 1`.
     """
-    # Same filter validation as the retrieval layer (§5.4, Stage 33).
+    # Same filter validation as the retrieval layer (section 5.4, Stage 33).
     validate_filter(filter_applied)
 
-    # Same query-shape validation as RetrievalQuery (§5.4).
+    # Same query-shape validation as RetrievalQuery (section 5.4).
     if not isinstance(query, str) or not query.strip():
         raise ValueError(
             "inspection query must be a non-empty string; "
@@ -147,7 +147,7 @@ def inspect_retrieval(
             f"values outside [0, 1] break the relevance-diversity trade-off"
         )
 
-    # Delegate to the concrete retriever (§5.4, Stage 31) — same path the
+    # Delegate to the concrete retriever (section 5.4, Stage 31) — same path the
     # API would take, but without routing through any endpoint.
 
     retriever = MMRRetriever(index=index, embedder=index._embedder)  # type: ignore[arg-type]

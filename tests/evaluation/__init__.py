@@ -1,4 +1,4 @@
-"""Golden evaluation dataset (§5.8, Stage 45).
+"""Golden evaluation dataset (section 5.8, Stage 45).
 
 Each line is a newline-delimited JSON record carrying the minimum fields
 required by `metrics.retrieval_metrics_for_query()` and the evaluation

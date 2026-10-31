@@ -160,7 +160,7 @@ def test_value_one_over_the_threshold_is_withheld() -> None:
 def test_default_threshold_sits_below_the_chunk_size() -> None:
     """A whole chunk must never fit through the guard.
 
-    Chunk size defaults to 1000 characters (§7.0), so a default below that
+    Chunk size defaults to 1000 characters (section 7.0), so a default below that
     guarantees a chunk cannot arrive intact.
     """
     assert DEFAULT_MAX_VALUE_CHARS < 1000

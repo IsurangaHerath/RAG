@@ -4,7 +4,7 @@ Why an interface at all
 -----------------------
 Embedding is the one pipeline step that is pure provider. OpenAI serves it
 today, a local model could serve it tomorrow, and nothing else in the
-system should notice. §1 of ARCHITECTURE promises to keep every stage
+system should notice. Section1 of ARCHITECTURE promises to keep every stage
 swappable behind a small interface, and this Protocol is that promise for
 embedding: application code asks for an ``Embedder``, never for
 ``OpenAIEmbeddings``, so changing providers is an import change rather

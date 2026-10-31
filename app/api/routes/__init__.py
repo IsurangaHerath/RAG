@@ -1,4 +1,4 @@
-"""API route handlers (§5.6, §6.2, Stages 53-57).
+"""API route handlers (section 5.6, section 6.2, Stages 53-57).
 
 These are the only files that import FastAPI; everything upstream
 (retrieval, generation, domain) stays framework-free. The routes never

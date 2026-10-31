@@ -1,7 +1,7 @@
 """Idempotent re-ingestion: load → chunk → embed → replace, safely (Stage 23).
 
-Deduplication (§5.2.6) can already *say* what an incoming file is — new,
-unchanged, modified or renamed — and the embedding steps (§5.14, §5.15) can
+Deduplication (section 5.2.6) can already *say* what an incoming file is — new,
+unchanged, modified or renamed — and the embedding steps (section 5.14, section 5.15) can
 turn chunks into vectors. Nobody yet performs the act those pieces describe:
 actually placing a document's chunks into a store, and — the whole point of
 this module — placing them a second time without the first copy surviving.
@@ -13,7 +13,7 @@ this pipeline already knows. An unchanged file returns before the chunker,
 the embedder or the store is touched: skipping is what makes re-ingestion
 *cheap*, not merely correct.
 
-**Replace, never append.** §6.1's protocol is ``delete_document(doc_id)``
+**Replace, never append.** section 6.1's protocol is ``delete_document(doc_id)``
 followed by ``upsert`` — old chunk ids and new ones overlap (both count from
 ``doc_id:0``), so appending would either collide or leave the previous
 version's tail retrievable forever. The delete runs even for a
@@ -28,7 +28,7 @@ stale beats missing, and the next run simply tries again. What remains is
 the narrow window between delete and upsert: a crash there leaves the
 document absent until the next run. That is recoverable by running again,
 and the planned registry flow closes it for good by marking a document
-``INDEXED`` only *after* a successful upsert (§5.2's sketch), so a crash
+``INDEXED`` only *after* a successful upsert (section 5.2's sketch), so a crash
 before that mark is exactly what tells the next run to redo the work.
 
 The known set is an in-memory stand-in for the registry
@@ -36,7 +36,7 @@ The known set is an in-memory stand-in for the registry
 :class:`IngestPipeline` keeps the documents it has written in a private
 list, seeded from the ``known`` argument. Its lookups reuse
 :func:`app.ingestion.deduplication.find_by_doc_id` / ``find_by_hash`` —
-named after the registry Protocol in §5.3 on purpose, so Stages 24-27 can
+named after the registry Protocol in section 5.3 on purpose, so Stages 24-27 can
 swap a real ``DocumentRegistry`` in place of the list without changing what
 this module means. A failed run is *not* remembered, so it is retried; an
 empty file is not remembered either, because it never became a document.
@@ -47,18 +47,18 @@ construction. A caller seeding ``known`` from documents hashed over raw
 file *bytes* would make every file read as modified — pass text-derived
 hashes, or change both sides together.
 
-**RENAMED is detection, not policy** (§5.2.6). The default here is
+**RENAMED is detection, not policy** (section 5.2.6). The default here is
 ``renamed_policy="skip"``: indexing the same bytes under a second path
 doubles every retrieval hit. A caller that knows a second path is a
 deliberate independent copy can pass ``renamed_policy="ingest"``.
 
-Deviations from §5.2's sketch, stated outright: ``run`` takes a filesystem
+Deviations from section 5.2's sketch, stated outright: ``run`` takes a filesystem
 path plus an explicit ``source_path`` rather than only ``doc_id`` — the
 caller is the one holding the file (a corpus path in tests, the file
 store's ``path_for(doc_id)`` for an upload) — and its result is named
 ``DocumentIngestResult`` because service.py already owns ``IngestResult``
 for the batch report. Document *status* is left at ``PENDING``: lifecycle
-transitions belong to the registry (§5.3.2), applied by whoever drives
+transitions belong to the registry (section 5.3.2), applied by whoever drives
 it, which is also why this module's outcomes are its own vocabulary
 rather than :class:`~app.domain.models.IngestStatus`.
 """
@@ -121,7 +121,7 @@ class PipelineAction(StrEnum):
 
 
 class ChunkStore(Protocol):
-    """The slice of §5.3's ``VectorIndex`` this stage actually needs.
+    """The slice of section 5.3's ``VectorIndex`` this stage actually needs.
 
     Declared consumer-side, here, so ingestion can be tested against an
     in-memory double today; the Chroma adapter (Stages 24+) satisfies it
@@ -139,7 +139,7 @@ class ChunkStore(Protocol):
 
 
 class ChunkSplitter(Protocol):
-    """§5.2's ``Chunker`` signature, declared where it is consumed."""
+    """section 5.2's ``Chunker`` signature, declared where it is consumed."""
 
     def split(
         self, document: TextDocument | PdfDocument, *, doc_id: str
@@ -242,10 +242,10 @@ class IngestPipeline:
     Parameters
     ----------
     embedder:
-        §5.12's contract; batching/retries (§5.14) are its own concern.
+        section 5.12's contract; batching/retries (section 5.14) are its own concern.
     store:
         Where chunks land. Only :class:`ChunkStore` is required — the
-        §5.3 subset used here.
+        section 5.3 subset used here.
     chunker:
         Anything with :meth:`ChunkSplitter.split`. Defaults to a fresh
         :class:`~app.preprocessing.chunking.RecursiveChunker`, whose

@@ -6,7 +6,7 @@ payloads, overwrite with no debris left behind, ``path_for`` staying
 pure (no I/O for any id, valid or not), the ``doc_id`` format check
 that stops an id escaping the uploads directory, filesystem failures
 arriving as ``DependencyError`` with any previous file intact — and,
-closing §6.1's worker leg, a file saved by the store ingesting
+closing section 6.1's worker leg, a file saved by the store ingesting
 end-to-end through the real pipeline.
 """
 
@@ -63,7 +63,7 @@ def test_path_for_is_pure_and_creates_nothing(store: FileStore) -> None:
 def test_save_replaces_previous_bytes_and_leaves_no_debris(
     store: FileStore,
 ) -> None:
-    """Re-upload overwrites (§5.2), and the staging file never lingers."""
+    """Re-upload overwrites (section 5.2), and the staging file never lingers."""
     with io.BytesIO(b"first draft") as stream:
         store.save(stream, doc_id=DOC_ID)
     with io.BytesIO(b"final draft") as stream:
@@ -91,7 +91,7 @@ def test_save_replaces_previous_bytes_and_leaves_no_debris(
     ids=lambda value: repr(value),
 )
 def test_ids_outside_the_document_id_format_are_rejected(store: FileStore, bad_id: str) -> None:
-    """A malformed id never becomes part of a path (§5.1's format)."""
+    """A malformed id never becomes part of a path (section 5.1's format)."""
     with pytest.raises(ValidationError) as excinfo:
         store.path_for(bad_id)
     assert excinfo.value.code == "invalid_request"
@@ -157,12 +157,12 @@ def test_a_stream_that_dies_mid_copy_leaves_no_partial_file(
 
 
 def test_the_default_root_sits_under_the_configured_data_dir() -> None:
-    """§6.1's ``data/uploads`` comes from Settings, not a hard-coded path."""
+    """section 6.1's ``data/uploads`` comes from Settings, not a hard-coded path."""
     assert FileStore().root == Settings().data_dir / UPLOADS_DIRNAME
 
 
 def test_a_saved_file_ingests_end_to_end(tmp_path: Path) -> None:
-    """§6.1's worker leg: ``doc_id`` → stored bytes → chunks.
+    """section 6.1's worker leg: ``doc_id`` → stored bytes → chunks.
 
     The api saves the upload, the worker gets only the id, resolves it
     through ``path_for`` and hands that path to the pipeline — the

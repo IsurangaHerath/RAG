@@ -244,7 +244,7 @@ class FakeLLMClient:
 
 
 class FakeChunkStore:
-    """In-memory stand-in for the vector index (§5.3's ``VectorIndex``).
+    """In-memory stand-in for the vector index (section 5.3's ``VectorIndex``).
 
     Holds chunks exactly as a store would — ``doc_id`` → ``chunk_id`` →
     vector — and records every operation in order, so tests can assert

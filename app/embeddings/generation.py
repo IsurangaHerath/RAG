@@ -1,7 +1,7 @@
 """Chunks to vectors — the pipeline's *embed* step (Stage 22).
 
-§5.2 draws ingestion as ``load → chunk → embed → upsert``. Loading is
-§5.2.2/§5.2.3 and splitting is §5.11; this module is the third arrow: it
+section 5.2 draws ingestion as ``load → chunk → embed → upsert``. Loading is
+section 5.2.2/section 5.2.3 and splitting is section 5.11; this module is the third arrow: it
 takes the chunks one document split into and returns one vector per chunk,
 in the same order, ready to hand straight to
 ``VectorIndex.upsert(chunks, vectors)``.
@@ -12,12 +12,12 @@ Why a seam and not a comprehension
 is one line — and one silent way to poison an index. This is where
 *chunk ids* meet *vectors*: if the counts disagree, citation *i* points at
 chunk *j*'s text and nothing downstream can notice. The adapter already
-validates everything it receives (§5.13), but two gaps remain:
+validates everything it receives (section 5.13), but two gaps remain:
 
 * its checks are per request, while alignment is a property of the whole
   document — batches are joined *here*, so this is the only place that
   sees all of them at once;
-* the contract suite (§5.12) proves implementations behave at test time,
+* the contract suite (section 5.12) proves implementations behave at test time,
   not at 3 a.m. in production, so the worst failure deserves a cheap
   runtime guard of its own.
 
@@ -27,7 +27,7 @@ expensive per-component walk (finiteness) stays where it was already paid
 for, in the adapter.
 
 Provider failures pass through untouched: a rate limit that exhausts the
-retry policy (§5.14) arrives as ``ProviderRateLimitError`` and leaves as
+retry policy (section 5.14) arrives as ``ProviderRateLimitError`` and leaves as
 the same exception, so callers handle one error hierarchy regardless of
 which layer noticed first.
 
@@ -56,10 +56,10 @@ def embed_chunks(embedder: Embedder, chunks: Sequence[Chunk]) -> list[list[float
     Parameters
     ----------
     embedder:
-        Any implementation of §5.12's contract. Batching and retries
-        (§5.14) are that implementation's own concern and invisible here.
+        Any implementation of section 5.12's contract. Batching and retries
+        (section 5.14) are that implementation's own concern and invisible here.
     chunks:
-        The split document — typically one document's worth, as §6.1's
+        The split document — typically one document's worth, as section 6.1's
         worker does. Order in is order out: ``vectors[i]`` belongs to
         ``chunks[i]``.
 
@@ -77,7 +77,7 @@ def embed_chunks(embedder: Embedder, chunks: Sequence[Chunk]) -> list[list[float
         (``embedding_count_mismatch``), an empty vector
         (``embedding_invalid_vector``), or vectors that disagree on
         dimension (``embedding_dimension_mismatch``). The codes match
-        the adapter's (§5.13) on purpose — one alert rule should catch
+        the adapter's (section 5.13) on purpose — one alert rule should catch
         the same class of failure wherever it is first noticed.
     RAGErrors from the embedder
         Propagate unchanged (a rate limit stays a rate limit), so the

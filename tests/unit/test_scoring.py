@@ -1,4 +1,4 @@
-"""Tests for distance-to-score conversion (§5.4, Stage 32 — scoring).
+"""Tests for distance-to-score conversion (section 5.4, Stage 32 — scoring).
 
 The conversion is structural: cosine distance has a provable fixed range
 [0, 2] for unit-normalised embeddings (the opposite-direction case is

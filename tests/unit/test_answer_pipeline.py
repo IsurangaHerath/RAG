@@ -1,4 +1,4 @@
-"""End-to-end answer path on a real index, with the model stubbed (§5.5, §6.2).
+"""End-to-end answer path on a real index, with the model stubbed (section 5.5, section 6.2).
 
 The model is the one component that cannot run offline, so it is the one
 component replaced: `FakeLLMClient` returns text, and the real retrieval,

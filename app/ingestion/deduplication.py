@@ -46,7 +46,7 @@ Nothing here opens a file, talks to a store, or holds state. Callers pass
 the documents they know about and get a decision back, which is what makes
 this testable with no database, no network and no API key. The lookups are
 named ``find_by_doc_id`` / ``find_by_hash`` to mirror the registry Protocol
-in ARCHITECTURE §5.4, so when the real registry lands it can replace these
+in ARCHITECTURE section 5.4, so when the real registry lands it can replace these
 list scans with indexed queries without changing this contract. Until then
 a scan is a linear pass — fine for what a single-process ingest sees, and
 said here rather than left to be discovered.

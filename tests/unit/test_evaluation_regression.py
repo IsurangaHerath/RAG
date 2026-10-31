@@ -1,4 +1,4 @@
-"""Regression gate for evaluation metrics (§5.8).
+"""Regression gate for evaluation metrics (section 5.8).
 
 The gate compares a metric result against configured floors. Falling
 below any floor raises `EvaluationRegressionError` with no answer text

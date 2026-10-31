@@ -1,6 +1,6 @@
-"""The full query pipeline: retrieve -> assemble -> prompt -> generate (§5.5, §6.2).
+"""The full query pipeline: retrieve -> assemble -> prompt -> generate (section 5.5, section 6.2).
 
-Not an endpoint (§5.6): this module connects retrieval (Stages 30-35),
+Not an endpoint (section 5.6): this module connects retrieval (Stages 30-35),
 context assembly (Stage 36), prompt construction, the `LLMClient` adapter
 and citation verification into one object. The concrete
 `GroundedAnswerPipeline` runs:
@@ -19,7 +19,7 @@ without a live model.
 Error policy: every stage raises typed `RAGError` subclasses
 (`ValidationError` for bad input; `ConfigurationError` for a missing
 embedder/LLM; `DependencyError` for provider failures) so a single
-`try/except` at the API layer (§5.6) produces one RFC7807-style response
+`try/except` at the API layer (section 5.6) produces one RFC7807-style response
 regardless of where the failure occurred. An answer that cites a passage
 outside the retrieved context raises `ValidationError` (`invalid_citation`)
 rather than being returned as if it were verified.
@@ -77,7 +77,7 @@ def _response_text(messages: Sequence[BaseMessage]) -> str:
 
 
 class QueryPipeline(Protocol):
-    """The full §6.2 flow: retrieve -> assemble -> prompt -> answer."""
+    """The full section 6.2 flow: retrieve -> assemble -> prompt -> answer."""
 
     def retrieve_context(
         self,
@@ -126,9 +126,9 @@ class GroundedAnswerPipeline:
     """Concrete pipeline wiring retrieval, prompting, generation and checking.
 
     Holds the `ChromaIndex` (Stage 30, read + write), the `Embedder`
-    (shared with the index for same-space embeddings, §5.3.5), the
+    (shared with the index for same-space embeddings, section 5.3.5), the
     `MMRRetriever` (Stage 31), `SimpleContextBuilder` (Stage 36),
-    `GroundingPromptBuilder` (§5.5), and an optional `LLMClient`. All can
+    `GroundingPromptBuilder` (section 5.5), and an optional `LLMClient`. All can
     be injected; the retriever reuses the index's embedder by design.
 
     `llm_client` may be `None` for the offline legs: `retrieve_context()`
@@ -147,7 +147,7 @@ class GroundedAnswerPipeline:
                 "Pipeline requires an index with an embedder; construct ChromaIndex(embedder=...)",
                 code="embedder_not_configured",
             )
-        # The retriever uses the index's embedder (§5.3.5); the pipeline
+        # The retriever uses the index's embedder (section 5.3.5); the pipeline
         # does not create a separate one, so query and chunk embeddings
         # stay in the same space. `embedder` is accepted for callers that
         # already hold one, but the index's own instance wins.
@@ -164,15 +164,15 @@ class GroundedAnswerPipeline:
         k: int = 20,
         budget_tokens: int = 3000,
     ) -> GroundedContext:
-        """Retrieve and assemble evidence (§6.2); does not call the LLM.
+        """Retrieve and assemble evidence (section 6.2); does not call the LLM.
 
         Returns the `GroundedContext` with citation mapping, chunk texts,
         and budget applied. A caller that only needs the evidence (e.g.
         an evaluation harness, CLI demonstration) can stop here; a caller
         that needs an answer passes the context through the prompt layer
-        to the model (§5.5).
+        to the model (section 5.5).
         """
-        # Same validation as the retrieval layer (§5.4, Stage 33).
+        # Same validation as the retrieval layer (section 5.4, Stage 33).
         validate_filter(filter_applied)
         if not isinstance(query, str) or not query.strip():
             raise ValidationError(
@@ -184,12 +184,12 @@ class GroundedAnswerPipeline:
                 f"k must be an integer >= 1, got {k!r}",
                 code="invalid_top_k",
             )
-        # Step 1: retrieval (§5.4).
+        # Step 1: retrieval (section 5.4).
         chunks = self._retriever.retrieve(
             RetrievalQuery(query=query, filter=filter_applied),
             k=k,
         )
-        # Step 2: context assembly (§5.4 -> §5.5).
+        # Step 2: context assembly (section 5.4 -> section 5.5).
         return self._builder.build(query=query, chunks=chunks, budget_tokens=budget_tokens)
 
     def build_prompt(
@@ -201,7 +201,7 @@ class GroundedAnswerPipeline:
         budget_tokens: int = 3000,
         history: Sequence[str] | None = None,
     ) -> list[BaseMessage]:
-        """Full §6.2 flow through `GroundedContext`; does not call the LLM."""
+        """Full section 6.2 flow through `GroundedContext`; does not call the LLM."""
         context = self.retrieve_context(
             query, filter_applied=filter_applied, k=k, budget_tokens=budget_tokens
         )

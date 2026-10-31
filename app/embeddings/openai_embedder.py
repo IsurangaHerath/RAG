@@ -1,6 +1,6 @@
 """The OpenAI adapter: our ``Embedder`` contract over langchain's client (Stage 20).
 
-The contract exists (§5.12 of ARCHITECTURE); this module is the first
+The contract exists (section 5.12 of ARCHITECTURE); this module is the first
 implementation of it, and it does three jobs around
 ``langchain_openai.OpenAIEmbeddings``:
 
@@ -29,7 +29,7 @@ with, safe to log. The original exception still rides along as
 ``__cause__``, so full context exists for anyone who catches and
 inspects it deliberately.
 
-Why ``OpenAIEmbeddings`` and not the raw ``openai`` client: §7.3 pinned
+Why ``OpenAIEmbeddings`` and not the raw ``openai`` client: section 7.3 pinned
 ``langchain-openai`` for exactly this class (and ``ChatOpenAI`` later for
 generation), it already ships in the pinned dependencies, and it handles
 the awkward parts — token-length splitting of long inputs, key handling —
@@ -106,7 +106,7 @@ class OpenAIEmbedder:
         validated one at a time, and the dimension learned from the
         first batch is enforced on every later one.
     retry_wait:
-        Tenacity wait strategy between attempts (§5.14 owns the
+        Tenacity wait strategy between attempts (section 5.14 owns the
         policy). Injectable so tests exercise retry paths in
         milliseconds; production uses the exponential default.
     """
@@ -179,7 +179,7 @@ class OpenAIEmbedder:
 
         The retry wraps the *raw* client call so the policy can classify
         raw OpenAI exceptions precisely — 429/5xx/connection are retried,
-        auth and 400 are not (§5.14). Translation happens only after the
+        auth and 400 are not (section 5.14). Translation happens only after the
         policy has given up, so the error callers receive is the real
         final failure, just in our hierarchy.
         """

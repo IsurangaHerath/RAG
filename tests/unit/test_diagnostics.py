@@ -1,12 +1,12 @@
-"""Tests for the dev-only retrieval inspector (§5.4, Stage 35 — diagnostics).
+"""Tests for the dev-only retrieval inspector (section 5.4, Stage 35 — diagnostics).
 
-Not routed through the API (§5.6), not wired into any pipeline stage,
+Not routed through the API (section 5.6), not wired into any pipeline stage,
 not called by `retriever.py`. A debugging and demonstration tool only:
 `inspect_retrieval(query, *, index, k, filter)` builds a
 `RetrievalInspection` with provenance, raw distance, converted score,
 and truncated content preview — never full text, so inspection output
 can be committed or shared without a second unredacted copy of the
-corpus (§5.9).
+corpus (section 5.9).
 """
 
 from __future__ import annotations

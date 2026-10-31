@@ -1,7 +1,7 @@
-"""Optional score threshold (§5.4, Stage 34) — `thresholds.py`.
+"""Optional score threshold (section 5.4, Stage 34) — `thresholds.py`.
 
 After `scoring.py` (Stage 32) converts distance to a [0, 1] score and
-before `reranker` (optional) or `ContextBuilder` (§5.4), a threshold
+before `reranker` (optional) or `ContextBuilder` (section 5.4), a threshold
 excludes evidence that is not close enough to the query. The floor is
 optional (`None` = disabled, the default) and configurable per call,
 because a calibrated threshold only arrives once evaluation (Stage 45+)
@@ -19,7 +19,7 @@ Parameters
 ----------
 threshold (float | None):
     The minimum acceptable score; chunks below are excluded. Disabled by
-    default (``None``) until evaluation calibrates it (§5.4, Stage 34).
+    default (``None``) until evaluation calibrates it (section 5.4, Stage 34).
 """
 
 from __future__ import annotations

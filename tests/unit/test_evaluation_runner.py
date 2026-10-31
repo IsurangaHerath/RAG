@@ -1,4 +1,4 @@
-"""Tests for the evaluation runner (§5.8, Stages 45-52).
+"""Tests for the evaluation runner (section 5.8, Stages 45-52).
 
 The runner connects the dataset, the metrics and the file-output contract.
 These tests prove the CSV is reproducible (same dataset yields same floats),

@@ -182,9 +182,9 @@ class Document:
 hashes the *bytes*. If `doc_id` were content-derived, editing a file would
 produce a brand-new document and its stale chunks would linger in the index
 forever. With path-derived ids, an edit keeps the same `doc_id` (so Stage 23
-can replace old chunks) while `content_sha256` changes (so §5.2.6 detects
+can replace old chunks) while `content_sha256` changes (so section 5.2.6 detects
 the edit). A rename changes `doc_id` but not the hash — that is exactly how
-§5.2.6 distinguishes *renamed* from *modified*.
+section 5.2.6 distinguishes *renamed* from *modified*.
 
 **Status lifecycle** (terminal states accept no further transitions):
 
@@ -234,9 +234,9 @@ idempotent re-ingestion. Validation rejects a mismatched `chunk_id`, a
 malformed `doc_id`, a negative index, empty content and non-scalar
 metadata, reusing the same helpers `Document` validates with. `summary()`
 omits `content` for exactly the reason `Document.summary()` does. How a
-document is split into chunks is §5.11.
+document is split into chunks is section 5.11.
 
-**Implemented (§5.5):** `Citation` + `Answer` (verified, redacted payload) with `LLMClient`; `metrics.py` and `runner.py` implemented (§5.8, 45–52) but thresholds/regression gate and reproducible benchmark numbers are pending. `TokenUsage` → Stage 51: metrics module exists, token usage tracking integrated but benchmark results unmeasured.
+**Implemented (section 5.5):** `Citation` + `Answer` (verified, redacted payload) with `LLMClient`; `metrics.py` and `runner.py` implemented (section 5.8, 45–52) but thresholds/regression gate and reproducible benchmark numbers are pending. `TokenUsage` → Stage 51: metrics module exists, token usage tracking integrated but benchmark results unmeasured.
 
 ### 5.2 Ingestion
 
@@ -244,12 +244,12 @@ Responsibility: turn a stored file into indexed, citable chunks. Idempotent per 
 
 ```python
 # Design sketches, written before any stage ran. The sections marked
-# "implemented" are authoritative where they differ; §5.11 is the chunker's
-# and §5.12 the embedder's.
+# "implemented" are authoritative where they differ; section 5.11 is the chunker's
+# and section 5.12 the embedder's.
 class DocumentLoader(Protocol):
     def load(self, path: Path, *, doc_id: str, media_type: str) -> TextDocument | PdfDocument: ...
         # originally drawn as list[LCDocument]; Stages 11-12 built native
-        # records instead (§5.2.2 / §5.2.3) and the types stayed framework-free
+        # records instead (section 5.2.2 / section 5.2.3) and the types stayed framework-free
 
 class Chunker(Protocol):
     def split(self, document: TextDocument | PdfDocument, *, doc_id: str) -> list[Chunk]: ...
@@ -259,18 +259,18 @@ class Chunker(Protocol):
 class Embedder(Protocol):
     def embed_documents(self, texts: Sequence[str]) -> list[list[float]]: ...
         # batched (e.g. 128), retries with exponential backoff on 429/5xx —
-        # batching/retries Stage 21 (§5.14); interface Stage 19 (§5.12),
-        # adapter Stage 20 (§5.13)
+        # batching/retries Stage 21 (section 5.14); interface Stage 19 (section 5.12),
+        # adapter Stage 20 (section 5.13)
     def embed_query(self, text: str) -> list[float]: ...
 
 class IngestPipeline(Protocol):
     def run(self, doc_id: str) -> IngestResult: ...
         # load → chunk → embed → upsert → registry.update_status(INDEXED | FAILED)
-        # implemented Stage 23 (§5.16): run(path, source_path=...) — the
-        # caller locates the file (§5.3.3's FileStore does for an upload);
-        # the result is DocumentIngestResult (IngestResult is §5.2.7's
+        # implemented Stage 23 (section 5.16): run(path, source_path=...) — the
+        # caller locates the file (section 5.3.3's FileStore does for an upload);
+        # the result is DocumentIngestResult (IngestResult is section 5.2.7's
         # batch report), and update_status still belongs to whoever drives
-        # the registry (§5.3.2), which closes the delete→upsert window
+        # the registry (section 5.3.2), which closes the delete→upsert window
 ```
 
 ### 5.2.1 Discovery (`ingestion/discovery.py`) — implemented in Stage 10
@@ -324,7 +324,7 @@ yields identical ordering — required for stable ids in Stage 23.
 
 ### 5.2.2 Text loaders (`ingestion/loaders.py`) — implemented in Stage 11
 
-Loads `.txt` / `.md`. PDF has its own loader (§5.2.3); asking this module for
+Loads `.txt` / `.md`. PDF has its own loader (section 5.2.3); asking this module for
 a PDF fails with an actionable message rather than decoding bytes as text.
 
 ```python
@@ -376,7 +376,7 @@ NUL bytes are rejected rather than decoded because a `.docx` or image given a
 `.txt` name would otherwise "succeed" and be indexed as garbage.
 
 **Empty is valid, not an error.** A zero-byte or whitespace-only file returns a
-`TextDocument` with `is_empty == True`; §5.2.5 reports such files as *skipped*
+`TextDocument` with `is_empty == True`; section 5.2.5 reports such files as *skipped*
 rather than failing the batch.
 
 **Out of scope:** OCR. A scanned *image* has no extractable text, and
@@ -421,7 +421,7 @@ with Python's zero-based indexing is documented and tested.
 
 **A missing text layer is reported, not raised.** A scanned PDF is a valid
 file with no text. It returns `has_text_layer == False` / `is_empty == True`
-(the PDF analogue of the empty-text-file case in §5.2.2) so §5.2.5 marks it
+(the PDF analogue of the empty-text-file case in section 5.2.2) so section 5.2.5 marks it
 it *skipped*. Genuine failures — corrupt bytes, or encrypted with no usable
 password — still raise, because those are things a caller may need to act on.
 
@@ -450,7 +450,7 @@ raising; each becomes a typed error carrying the real reason, so the `pypdf`
 logger is raised to ERROR for the duration of a read and restored afterwards.
 
 **Not implemented:** OCR (as above), form-field extraction, and digital
-signatures. Embedded metadata itself is handled by §5.2.4. `password` exists
+signatures. Embedded metadata itself is handled by section 5.2.4. `password` exists
 and is tested, but nothing supplies it yet — there is no password-management
 feature.
 
@@ -493,7 +493,7 @@ pypdf passes control characters, NUL bytes, newlines and tabs through
 untouched — a title of `"Bad\x00Title\x07"` round-trips verbatim — so every
 value has control characters stripped, whitespace collapsed and length
 capped (`MAX_TITLE_LENGTH` 200 for titles, `MAX_FIELD_LENGTH` 1000
-otherwise, `MAX_KEYWORDS` 32). This is the same reason §5.2.2 refuses NUL
+otherwise, `MAX_KEYWORDS` 32). This is the same reason section 5.2.2 refuses NUL
 bytes in file *content*: untrusted bytes must not reach a place where they
 can forge a log line or escape a terminal. Nothing is ASCII-folded —
 Sinhala, CJK and emoji titles are legitimate and round-trip correctly, so
@@ -541,7 +541,7 @@ values; `pdf_loader` imports *from* it to capture `PdfInfo` while its reader
 is already open and decrypted, so the file is never read twice. That capture
 runs after `_decrypt`, because an encrypted PDF's info dictionary is not
 readable before decryption. Composing a loaded document into a full record
-is the ingest service's (§5.2.5) job, which keeps the import graph acyclic.
+is the ingest service's (section 5.2.5) job, which keeps the import graph acyclic.
 
 **Errors:** none. Every failure here degrades to a missing value, which is
 why no row appears in the error table. The three `except` guards around
@@ -586,7 +586,7 @@ EMPTY_FILE_CODE = "empty_file";  NO_TEXT_LAYER_CODE = "no_text_layer"
 
 **Outcomes are not lifecycle statuses.** Results are tagged
 `FileOutcome`, deliberately a *different* vocabulary from `IngestStatus`
-(§5.1). That enum describes a registered document travelling through a
+(section 5.1). That enum describes a registered document travelling through a
 pipeline, and it is owned by the registry; this service runs before any
 registry exists, and its three outcomes do not map onto those five:
 
@@ -644,14 +644,14 @@ in the caller), while a media type the *file* turns out to have is reported
 as a per-file outcome (a property of the data).
 
 **Deliberately not here:** no `doc_id`, no content hash, no `Document`
-record and no registry writes — those are deduplication's job (§5.2.6).
+record and no registry writes — those are deduplication's job (section 5.2.6).
 Holding them back keeps this module a pure *function of a file* (path in,
 outcome out), which is what makes it testable with no store, no network and
 no API key. No new dependencies: it composes modules that already exist.
 
 ### 5.2.6 Deduplication (`ingestion/deduplication.py`) — implemented in Stage 15
 
-The service (§5.2.5) answers *"can this file be read?"*. This module answers
+The service (section 5.2.5) answers *"can this file be read?"*. This module answers
 the harder follow-up: *"have I seen it before, and if so, in what sense?"*
 
 ```python
@@ -673,7 +673,7 @@ class DedupDecision:
     # .needs_ingest .is_duplicate_content .summary()
 ```
 
-**Why two identifiers, revisited.** §5.1 split `doc_id` (hash of the source
+**Why two identifiers, revisited.** section 5.1 split `doc_id` (hash of the source
 path) from `content_sha256` (hash of the content) precisely so that this
 comparison is possible. Neither alone can tell the cases apart: path alone
 cannot see an edit, and content alone cannot tell whether a document is new
@@ -717,7 +717,7 @@ path's own `doc_id` is correct either way.
 talks to a store, or holds state: callers pass the documents they know about
 and get a decision back, which is what makes this testable with no database,
 no network and no API key. `find_by_doc_id` / `find_by_hash` are named to
-mirror the registry Protocol (§5.4), so when a real registry lands it can
+mirror the registry Protocol (section 5.4), so when a real registry lands it can
 replace these linear scans with indexed queries without changing this
 contract. A scan is linear — honest for what a single-process ingest sees,
 and said here rather than left to be discovered.
@@ -750,7 +750,7 @@ those decisions, is the ingest pipeline's job.
 
 ### 5.2.7 Ingest reporting (`ingestion/reporting.py`) — implemented in Stage 16
 
-§5.2.5 answers *"what happened to this batch?"* in a form sized for **logs
+section 5.2.5 answers *"what happened to this batch?"* in a form sized for **logs
 and API responses**: counts, the root's name, one entry per problem file —
 because a log line that lists 200 failures is noise with a cost attached. A
 report is the same question asked somewhere else: once, at the end of a run,
@@ -795,7 +795,7 @@ reported a size rather than `0`, and `duration_seconds` is `None` unless the
 caller supplies it. "Never measured" and "there was nothing" are different
 facts, and a report must not invent the second to fill the first.
 
-**Deduplication tallies are optional.** Pass §5.2.6's decisions and the
+**Deduplication tallies are optional.** Pass section 5.2.6's decisions and the
 report says how many files were new, unchanged, modified or renamed — the
 answer to *did this run actually change anything?* Withhold them and the
 field is `None`, which renders as no section at all rather than as a row of
@@ -816,56 +816,56 @@ here.
 
 ### 5.3 Storage
 
-Responsibility: persistence + retrieval of vectors; lifecycle state of documents; storage of the uploaded source files. Two database-backed stores behind interfaces so they can be swapped (Chroma → pgvector; SQLite → Postgres), plus a plain file store over the data directory (§5.3.3).
+Responsibility: persistence + retrieval of vectors; lifecycle state of documents; storage of the uploaded source files. Two database-backed stores behind interfaces so they can be swapped (Chroma → pgvector; SQLite → Postgres), plus a plain file store over the data directory (section 5.3.3).
 
 ```python
 class VectorIndex(Protocol):
     def upsert(self, chunks: Sequence[Chunk], vectors: Sequence[vector]) -> None: ...
-        # implemented Stage 24 (§5.3.1); satisfies §5.16's ChunkStore
+        # implemented Stage 24 (section 5.3.1); satisfies section 5.16's ChunkStore
         # structurally, so the pipeline writes through to real storage
     def similarity_search(self, query: str, *, k: int,
                           filter: MetadataFilter | None = None) -> list[RetrievedChunk]: ...
-        # ``similarity_search`` is present (§5.3.5, Stage 30); it takes the
+        # ``similarity_search`` is present (section 5.3.5, Stage 30); it takes the
         # ``Embedder`` this instance holds, embeds the query text, hands
         # chroma the vector (not the text), and returns ``RetrievedChunk``
         # records with the raw cosine distance — no filter validation yet
-        # (§5.4, filters stage validates ``where`` clauses), and no
-        # score conversion (§5.4's scoring stage converts distance to a
+        # (section 5.4, filters stage validates ``where`` clauses), and no
+        # score conversion (section 5.4's scoring stage converts distance to a
         # score). The distance travels raw so a single number serves the
         # same meaning everywhere in the retrieval chain.
     def delete_document(self, doc_id: str) -> int: ...          # returns chunks removed
-        # implemented Stage 24 (§5.3.1)
+        # implemented Stage 24 (section 5.3.1)
     def count(self) -> int: ...
-        # implemented Stage 24 (§5.3.1)
+        # implemented Stage 24 (section 5.3.1)
 
 class DocumentRegistry(Protocol):
     def create(self, doc: Document) -> None: ...
-        # implemented Stage 25 (§5.3.2) — replaces rather than rejects, so a
+        # implemented Stage 25 (section 5.3.2) — replaces rather than rejects, so a
         # finished or failed document can restart at pending as a fresh record
     def get(self, doc_id: str) -> DocumentRecord | None: ...
-        # DocumentRecord is a type alias for Document (§5.3.2): status, error
-        # and content_sha256 are already §5.1 fields
+        # DocumentRecord is a type alias for Document (section 5.3.2): status, error
+        # and content_sha256 are already section 5.1 fields
     def list(self, *, status: IngestStatus | None, limit: int, offset: int) -> list[DocumentRecord]: ...
-        # implemented Stage 25 (§5.3.2) — limit/offset defaulted, ordered by doc_id
+        # implemented Stage 25 (section 5.3.2) — limit/offset defaulted, ordered by doc_id
     def update_status(self, doc_id: str, status: IngestStatus, error: str | None = None) -> None: ...
-        # implemented Stage 25 (§5.3.2) — transitions delegated to
-        # Document.with_status (§5.1); raises NotFoundError for unknown ids
+        # implemented Stage 25 (section 5.3.2) — transitions delegated to
+        # Document.with_status (section 5.1); raises NotFoundError for unknown ids
     def find_by_hash(self, sha256: str) -> DocumentRecord | None: ...   # dedup
-        # implemented Stage 25 (§5.3.2) — indexed, deterministic "first" = lowest doc_id
+        # implemented Stage 25 (section 5.3.2) — indexed, deterministic "first" = lowest doc_id
 
 class FileStore(Protocol):
     def save(self, stream: BinaryIO, *, doc_id: str) -> Path: ...
-        # implemented Stage 26 (§5.3.3) — atomic replace; validates doc_id
+        # implemented Stage 26 (section 5.3.3) — atomic replace; validates doc_id
         # before any I/O so a crafted id cannot escape the uploads directory
     def path_for(self, doc_id: str) -> Path: ...
-        # implemented Stage 26 (§5.3.3) — pure, no I/O: computes where the
+        # implemented Stage 26 (section 5.3.3) — pure, no I/O: computes where the
         # file would be; the opener of the path reports a missing one
 ```
 
 `DocumentRegistry.find_by_hash` is the indexed counterpart of
-`app.ingestion.deduplication.find_by_hash` (§5.2.6), which still scans a
+`app.ingestion.deduplication.find_by_hash` (section 5.2.6), which still scans a
 plain sequence: the storage behind the indexed lookup has existed since
-Stage 25 (§5.3.2), but nothing wires the scan to it yet. Same name, same
+Stage 25 (section 5.3.2), but nothing wires the scan to it yet. Same name, same
 contract, so the swap is a change of where the lookup runs, not of what
 it means.
 
@@ -873,16 +873,16 @@ Chroma specifics: single persistent collection `techdocs` (HNSW, cosine), `persi
 
 ### 5.3.1 Chroma index write path (`storage/chroma.py`) — implemented in Stage 24
 
-The first of §5.3's stores, and the write half of its
+The first of section 5.3's stores, and the write half of its
 `VectorIndex` contract: `upsert`, `delete_document` and `count` over a
 persistent collection — precisely the three methods
-`IngestPipeline` (§5.16) needed to stop depending on its in-memory
-double. The class satisfies §5.16's `ChunkStore` structurally (same
+`IngestPipeline` (section 5.16) needed to stop depending on its in-memory
+double. The class satisfies section 5.16's `ChunkStore` structurally (same
 method names, same signatures), so the pipeline's store argument moved
 from the test double to real storage with no glue code, and a test runs
 the whole pipeline against a real on-disk index.
 
-**§5.3's chroma specifics, implemented literally.** One collection
+**section 5.3's chroma specifics, implemented literally.** One collection
 `techdocs`, HNSW with cosine distance — cosine because retrieval cares
 about direction and embedding models do not promise magnitude.
 `persist_directory` comes from `Settings.chroma_persist_dir` rather than
@@ -891,21 +891,21 @@ temporary directories. Rows are keyed by `chunk_id`; each carries the
 chunk's text (retrieval quotes it back later) plus the metadata schema
 `doc_id, chunk_id, filename, page, section, media_type, ingested_at` —
 the first four from `filename`/`media_type`/`page`/`section`, copied
-verbatim out of `Chunk.metadata` exactly as §5.11 designed the chunker
+verbatim out of `Chunk.metadata` exactly as section 5.11 designed the chunker
 to provide them, and the rest written by the index.
 
 **The index's three keys are written last.** `doc_id`, `chunk_id` and
 `ingested_at` overwrite any same-named key a chunk might carry, because
 `doc_id` is the field `delete_document` filters on: a mislabelled chunk
-that could spoof it would make the overwrite protocol (§5.16) delete or
+that could spoof it would make the overwrite protocol (section 5.16) delete or
 spare the wrong document's rows.
 
 **No embeddings happen on the write path.** Vectors arrive already aligned
-by §5.15, so the collection is created without an embedding function and
-a write can never trigger a model download. `similarity_search` (§5.3.5)
+by section 5.15, so the collection is created without an embedding function and
+a write can never trigger a model download. `similarity_search` (section 5.3.5)
 embeds with the `Embedder` passed to the constructor — one query, one
 vector, no model download — and returns `RetrievedChunk` records with raw
-cosine distances, so score conversion stays a single job (§5.4's scoring
+cosine distances, so score conversion stays a single job (section 5.4's scoring
 stage).
 
 **Error translation is a policy, not a blanket `try`.** Chroma speaks
@@ -919,50 +919,50 @@ chroma's bare `ValueError` as `embedding_count_mismatch`, and chroma's
 vector disagreed with the collection's dimension" — reports
 `embedding_dimension_mismatch`. Every existing holder of both codes
 raises `DependencyError` too, so one alert rule still catches the same
-failure class wherever it is first noticed (the §5.15 rule, applied to
+failure class wherever it is first noticed (the section 5.15 rule, applied to
 a second seam). A blank collection name is rejected up front as a
 `ValidationError`, so caller mistakes get a 400-shaped error rather than
 whatever chroma might make of them.
 
 ### 5.3.2 Document registry (`storage/registry.py`) — implemented in Stage 25
 
-The second of §5.3's stores: where the *lifecycle* of a document
+The second of section 5.3's stores: where the *lifecycle* of a document
 lives — its status, its checksum, the record itself. Everything that
-has been waiting on a registry now has a home. §5.2.2's service noted
-it "runs before any registry exists"; §5.16's pipeline kept an
+has been waiting on a registry now has a home. section 5.2.2's service noted
+it "runs before any registry exists"; section 5.16's pipeline kept an
 in-memory list named after this Protocol precisely so this stage could
-replace it; and §5.1's status graph finally has something to apply it
+replace it; and section 5.1's status graph finally has something to apply it
 to.
 
 **SQLite, from the standard library.** No new dependency, one ordinary
 file next to the rest of the configured data, and every test runs
-against a temporary directory with no server to start. What §5.3
+against a temporary directory with no server to start. What section 5.3
 promises is the Protocol, not the engine — SQLite → Postgres stays a
 swap of implementation, and the SQL is deliberately uninteresting:
 one table, two indexes (on the checksum and the status), `?`
 placeholders, nothing interpolated.
 
 **The model owns the rules; the registry owns the rows.** Every status
-change goes through `Document.with_status` (§5.1), so the transition
+change goes through `Document.with_status` (section 5.1), so the transition
 graph, the "`failed` must carry an error" rule and the `ingested_at`
 stamp are enforced in exactly one place — the registry adds only the
 two things the model *cannot* know: `NotFoundError` for an id it never
 stored, and persistence of the result. A registry that re-implemented
 the graph would be a second copy waiting to drift from the first.
 
-**`create` replaces rather than rejects.** §5.1 makes terminal states
+**`create` replaces rather than rejects.** section 5.1 makes terminal states
 permanent on a *record*, with the documented remedy that "a finished
 document must be re-ingested (a fresh record)". `create` is that fresh
 record: re-registering a `doc_id` overwrites every column and returns
 the document to `pending`, which is what lets an edited file — or a
 retry after a crash — start over instead of being stuck at `indexed`
-or `failed`. §6.1's 409 for a duplicate upload is decided earlier, by
-§5.2.6's deduplication, never reaching this method.
+or `failed`. section 6.1's 409 for a duplicate upload is decided earlier, by
+section 5.2.6's deduplication, never reaching this method.
 
 **`DocumentRecord` is a name, not a second type.** The sketch's return
 type is a `type` alias for `Document`, because status, error and
 `content_sha256` — everything a registry manages — are already fields
-of §5.1's model; a parallel record class would be a second source of
+of section 5.1's model; a parallel record class would be a second source of
 truth for the same twelve columns. Full text is stored as well, so a
 round-trip is exact: every other component hands out complete
 `Document` objects, and a registry returning hollowed-out copies would
@@ -970,7 +970,7 @@ be a different kind of thing everywhere it was used.
 
 **Determinism, everywhere.** Every query orders by `doc_id` — unique
 and stable, so paging never skips or repeats a row. `find_by_hash` is
-the indexed counterpart of §5.2.6's sequence scan, same name and
+the indexed counterpart of section 5.2.6's sequence scan, same name and
 contract on purpose: "first" is the lowest `doc_id`, so one hash
 backing several paths (a renamed copy) always resolves to the same
 document. Negative `limit`/`offset` are rejected before sqlite can
@@ -982,23 +982,23 @@ lifecycle, assert terminal states refuse further moves, restart a
 finished record with a fresh `create`, page and filter listings, and
 translate an unopenable path into `DependencyError`. The closing test
 seeds an `IngestPipeline` from `registry.list()`: an unchanged file is
-skipped with zero embeds and zero store operations — §5.16's stand-in
+skipped with zero embeds and zero store operations — section 5.16's stand-in
 list, now supplied by the real thing.
 
 ### 5.3.3 File store (`storage/file_store.py`) — implemented in Stage 26
 
-The third of §5.3's stores — and the one everything else has
+The third of section 5.3's stores — and the one everything else has
 been talking around: *where is the file?* The ingest service records a
 `source_path`, the pipeline opens whatever path it is handed, and
-§6.1's worker carries nothing but a `doc_id` — somebody has to turn
+section 6.1's worker carries nothing but a `doc_id` — somebody has to turn
 that id back into bytes. `FileStore` is that somebody, in two methods:
 `save` writes a stream, `path_for` says where it went.
 
-**§6.1's layout, taken literally.** Files live at
+**section 6.1's layout, taken literally.** Files live at
 `data/uploads/{doc_id}/original`, one directory per document as the
 sequence diagram draws it, with a fixed name inside because `save`
 receives only bytes and an id — the original *filename* belongs to
-§5.1's record, which the registry holds, not to the store. The
+section 5.1's record, which the registry holds, not to the store. The
 directory leaves room for whatever later sits beside a source
 (extracted text, thumbnails) without a layout change. The `uploads`
 root comes from `Settings.data_dir`, so pointing `DATA_DIR`
@@ -1006,14 +1006,14 @@ somewhere else moves uploads along with everything else.
 
 **No extension, so the media type travels with the task.** A stored
 file has nothing to infer a type from, deliberately: bytes are opaque
-here. §6.1's api decides the type while it validates the upload and
+here. section 6.1's api decides the type while it validates the upload and
 hands `media_type` to the worker next to the `doc_id`; a caller that
 omits it falls back to `text/plain` — right for text and wrong for a
 PDF. The store refuses to guess; guessing is how a PDF gets read as
 plain text.
 
 **An id becomes a path, so the id is checked first.** `doc_id` is
-validated as §5.1's format — `doc_` plus 16 lowercase hex, exactly
+validated as section 5.1's format — `doc_` plus 16 lowercase hex, exactly
 what `make_doc_id` mints — *before* any path is built or any
 directory created. `..`, separators and drive letters cannot reach
 outside the uploads directory, and a rejected id costs no I/O at all.
@@ -1021,13 +1021,13 @@ outside the uploads directory, and a rejected id costs no I/O at all.
 path and creates nothing, and the component that opens the path
 reports the absence (`file_not_found`) rather than the lookup.
 
-**Writes replace atomically.** Re-uploading overwrites (§5.2's
+**Writes replace atomically.** Re-uploading overwrites (section 5.2's
 "re-upload overwrites rather than duplicates"): bytes go to a
 `.part` sibling and are moved into place with `os.replace`, so a
 reader sees the old file or the new one and never a half-written one.
 A failed write deletes its own staging file and leaves the previous
 good copy untouched; OS-level trouble arrives as `DependencyError`,
-same policy as §5.3.1 and §5.3.2.
+same policy as section 5.3.1 and section 5.3.2.
 
 **Proven by failing, not just by writing.** Tests round-trip binary
 payloads byte-for-byte, overwrite without leaving debris, reject a
@@ -1040,8 +1040,8 @@ ingest pipeline, which chunks them into the store in
 
 ### 5.3.4 Storage contract tests (`tests/unit/test_storage_contract.py`) — implemented in Stage 27
 
-The contract half of the storage vertical slice (§13, step 2), closing
-out §8's testing row — *each `Protocol` implementation conforms* — with a
+The contract half of the storage vertical slice (Section13, step 2), closing
+out Section8's testing row — *each `Protocol` implementation conforms* — with a
 suite of its own.
 
 **Three registries, one set of rules.** The contract tests run against
@@ -1057,7 +1057,7 @@ index's own ``Embedder``) joins ``upsert``, ``delete_document`` and ``count``
 here.
 
 **Cross-store legs close the loop.** The behaviour worth proving is not
-any single store but the hand-offs between them (§6.1): an upload saved by
+any single store but the hand-offs between them (section 6.1): an upload saved by
 the file store is ingested through the real pipeline into the real vector
 index, and the registry is the state that ties the two together — the
 status a worker is expected to move, and the dedup counterpart a content
@@ -1074,14 +1074,14 @@ registry file, temporary uploads root) with the offline embedder double.
 
 ### 5.3.5 Chroma index read path (`storage/chroma.py`) — implemented in Stage 30
 
-The same :class:`ChromaIndex` that writes (§5.3.1) also searches, through
+The same :class:`ChromaIndex` that writes (section 5.3.1) also searches, through
 ``similarity_search(query, *, k, filter=None)`` — a new method, not a new
 class. It takes the ``Embedder`` this instance holds, embeds the query,
 passes the vector (not the text) to chroma's ``query``, and returns
 :class:`~app.domain.models.RetrievedChunk` records with the raw cosine
 distance. The distance travels unconverted: score conversion
 (``scoring.py``) and filter validation (``filters.py``) are separate
-retrieval-layer stages (§5.4), so there is only ever one number for one
+retrieval-layer stages (section 5.4), so there is only ever one number for one
 distance. The ``filter`` is handed through to chroma's ``where`` without
 validating its contents (a malformed ``where`` raises chroma's own
 ``ValueError``, translated to ``ValidationError`` / ``invalid_filter``
@@ -1238,7 +1238,7 @@ risky state is the opt-in one.
 **Why a processor rather than discipline.** Review catches the *known* leak
 — the one a comment can anticipate. The processor catches the one nobody
 anticipated, because it never reasons about intent; it only sees that a
-value is large, oddly named, or an object. §5.2.5 and §5.2.7 obey the same
+value is large, oddly named, or an object. section 5.2.5 and section 5.2.7 obey the same
 rule from the other direction (never *build* a payload containing text), and
 the two halves meet: nothing constructs content-bearing output, and nothing
 would print it if something did.
@@ -1257,7 +1257,7 @@ callable directly, so the same six names are enforced rather than trusted.
 **Not implemented:** no file destination or rotation, no request-id context
 wiring, and no metrics (`observability/metrics.py`, Stage 51). This module
 configures the library and guarantees the redaction; shipping where the API
-puts its logs belongs with the API layer (§5.6).
+puts its logs belongs with the API layer (section 5.6).
 
 ### 5.10 Tooling: sample data and the command line (`scripts/`) — implemented in Stage 17
 
@@ -1270,7 +1270,7 @@ and would leave a newcomer with a corpus only one machine has. So
 every byte can be read in review.
 
 **Determinism is a requirement, not a nicety.** Document identity rests on
-hashing the path and hashing the content (§5.1), so a generator that
+hashing the path and hashing the content (section 5.1), so a generator that
 produced a slightly different file each run would report the whole corpus
 as *modified* on every re-ingest and hand it all back to the indexer. Hence
 no timestamps, no random ids, and builders that are byte-stable across
@@ -1295,7 +1295,7 @@ must not become a destroyed file on someone's disk.
 **The exit statuses mirror the pipeline's own distinction.** `ingest`
 exits `0` when nothing failed, `3` when the report printed but some files
 failed to load, and `1` when it could not run at all; argparse owns `2`.
-That is §5.2.5's *your data is wrong* against *your invocation is wrong*,
+That is section 5.2.5's *your data is wrong* against *your invocation is wrong*,
 made machine-readable, and the report still prints on `3` because a status
 with nothing behind it is one a caller cannot act on. Deliberate errors
 reach the user as message, code and detail on stderr rather than as a
@@ -1305,15 +1305,15 @@ traceback, because a bug must look like a bug.
 **stdout is the report; stderr is everything else.** `--format json` puts
 nothing but JSON on stdout so the output can be piped, while hints, errors
 and logging stay on stderr. Logging is configured before any work, so
-redaction applies to the CLI exactly as it does to the API (§5.9), but the
+redaction applies to the CLI exactly as it does to the API (section 5.9), but the
 happy path emits nothing above `DEBUG`: a tool that annotates its own
 successful run is noise.
 
 **The third command wires the storage slice together.** `index` takes the
 same `PATH`, `--no-recursive` and `--format` as `ingest`, builds the
-embedder from settings, opens §5.3.1's Chroma collection at the configured
-persist directory and §5.3.2's registry under the configured data
-directory, runs §5.17's pass over the directory, and prints §5.2.7's index
+embedder from settings, opens section 5.3.1's Chroma collection at the configured
+persist directory and section 5.3.2's registry under the configured data
+directory, runs section 5.17's pass over the directory, and prints section 5.2.7's index
 report. The embedder is built *first*, before any storage is opened: a
 missing `OPENAI_API_KEY` is a configuration error the user must fix, and
 discovering it should not cost a collection or a registry file. Exit
@@ -1340,12 +1340,12 @@ prevent.
 
 **Not implemented:** no deduplication tallies in the *ingest* report —
 `build_report` already accepts `decisions`, but the `ingest` command has
-no registry to compare against, and the pass that does (§5.17) reports its
+no registry to compare against, and the pass that does (section 5.17) reports its
 own tallies instead — and no file watching; `prepare` is run by hand.
 
 ### 5.11 Chunking (`preprocessing/chunking.py`) — implemented in Stage 18
 
-Responsibility: turn what a loader returned into the `Chunk` records of §5.1
+Responsibility: turn what a loader returned into the `Chunk` records of section 5.1
 that get embedded, stored and cited. One class does it —
 `RecursiveChunker(chunk_size=1000, chunk_overlap=150)` — wrapping LangChain's
 `RecursiveCharacterTextSplitter`, pinned in `requirements.txt` since Stage 05.
@@ -1365,7 +1365,7 @@ depends on the source:
 is the thing a reader can follow back through the document to check a
 citation. Text before the first heading has no `section` at all.
 
-Every chunk also carries `filename` and `media_type`, because §5.3's storage
+Every chunk also carries `filename` and `media_type`, because section 5.3's storage
 schema lists them and attaching them here means the indexing stage copies
 what it is given instead of reconstructing it from elsewhere. Keys a source
 cannot honestly answer are **left out**, never `""` or `-1`: `section=""`
@@ -1405,7 +1405,7 @@ them would invent text that appears nowhere in the document). The folded
 chunk may exceed `chunk_size` by exactly its heading's length. That is a
 deliberate trade — `chunk_size` is a quality target, not a ceiling anything
 downstream depends on, since embeddings accept far more than 1000
-characters and §5.4 counts tokens when assembling a prompt. A chunk with no
+characters and section 5.4 counts tokens when assembling a prompt. A chunk with no
 heading to glue never overshoots.
 
 **Settings are validated in the constructor**: `chunk_size >= 1` and
@@ -1422,9 +1422,9 @@ unchanged file overwrites the same `chunk_id` values instead of appending a
 second copy of every chunk. An input with no text (empty file, a scan) is
 `[]`, not an error.
 
-**Deviation from §5.2's original Protocol sketch:** `split()` takes
+**Deviation from section 5.2's original Protocol sketch:** `split()` takes
 `TextDocument | PdfDocument`, not `list[LCDocument]`, for the same reason
-the loaders do (§5.2.2 / §5.2.3). The pipeline's call site becomes
+the loaders do (section 5.2.2 / section 5.2.3). The pipeline's call site becomes
 `chunker.split(loader.load(...), doc_id=...)` with no conversion step, and
 LangChain's document type stays an implementation detail inside this module
 rather than appearing in a signature the rest of the project must depend on.
@@ -1438,12 +1438,12 @@ and otherwise breaks between rows, which is all the separator list promises.
 
 The first half of embedding generation is not a provider call; it is the
 agreement that makes providers interchangeable. `Embedder` is a structural
-`Protocol` with exactly the two methods §5.2 sketched: `embed_documents(texts)`
+`Protocol` with exactly the two methods section 5.2 sketched: `embed_documents(texts)`
 returns one vector per input, in input order, and `embed_query(text)` returns
 one vector for one question. Application code asks for an `Embedder` and never
 for `OpenAIEmbeddings`, so changing providers later is an import change rather
-than a refactor — §1's promise, made checkable instead of aspirational. The
-interface sits with its component in `embeddings/base.py` (§4's layout), not
+than a refactor — Section1's promise, made checkable instead of aspirational. The
+interface sits with its component in `embeddings/base.py` (Section4's layout), not
 in `domain/`, which stays data-only: models and errors, no behaviour contracts.
 
 **The property everything downstream rests on:** a text embeds the same way
@@ -1477,7 +1477,7 @@ would break the reproducibility every other test assumes. The double lives
 under `tests/` rather than `app/` precisely because it must never be
 mistaken for a provider in production code.
 
-**Batching and retries now live behind the contract** (§5.14): the adapter
+**Batching and retries now live behind the contract** (section 5.14): the adapter
 embeds texts in order-preserving batches and every call runs through one
 bounded retry policy, so implementations of the contract are expected to
 absorb transient provider failures rather than surface them on the first
@@ -1487,8 +1487,8 @@ in charge of what the vectors actually are.
 
 ### 5.13 OpenAI adapter (`embeddings/openai_embedder.py`) — implemented in Stage 20
 
-The first implementation of §5.12's contract, wrapped around
-`langchain_openai.OpenAIEmbeddings` (§7.3 pinned that class for exactly this,
+The first implementation of section 5.12's contract, wrapped around
+`langchain_openai.OpenAIEmbeddings` (section 7.3 pinned that class for exactly this,
 and it already ships in the pinned dependencies). It does three jobs in call
 order: validate input with the shared rule from `base.py` — a blank text is
 answered locally with `empty_embedding_input` rather than paid for with a
@@ -1522,7 +1522,7 @@ appears anywhere in the raised error.
 **Still no retries here, on purpose.** The client is built with
 `max_retries=0`, so the openai transport cannot invent retry policy behind
 our back; the bounded retries with exponential backoff live in
-`batching.py` (§5.14), wrapping this adapter's calls, where one policy can
+`batching.py` (section 5.14), wrapping this adapter's calls, where one policy can
 be seen, tested and counted instead of two silently multiplying worst-case
 latency. `from_settings` assembles that client from `Settings` — model,
 timeout, and the key via `require_openai_key()`, which fails with an
@@ -1549,7 +1549,7 @@ the model's full size is (`.env.example` warns that changing
 One embedding call can fail in two unrelated ways, and each needs a
 different answer. **Too much at once** is answered by `iter_batches`:
 consecutive, order-preserving slices of at most `DEFAULT_BATCH_SIZE` (128,
-the sketch's "e.g. 128" in §5.2). The last batch may be shorter, empty
+the sketch's "e.g. 128" in section 5.2). The last batch may be shorter, empty
 input yields no batches at all, and `require_batch_size` rejects sizes
 below 1 with `invalid_batch_size` — a bad size fails on the line that set
 it, not as a mysteriously short document mid-run. Ordering is the whole
@@ -1565,18 +1565,18 @@ means the request is wrong — the identical retry produces the identical
 failure, it only buys quadratic latency. Also not retryable: anything
 that is not an OpenAI exception at all, which would be our own bug
 wearing a network's clothes; waiting two seconds does not fix a typo.
-The predicate runs on the *raw* client exceptions, before §5.13's
+The predicate runs on the *raw* client exceptions, before section 5.13's
 translation, precisely because classification needs the real HTTP status.
 
 **Bounded is a promise, not a preference.** `DEFAULT_RETRY_ATTEMPTS` is 4
 (one try plus three retries); waits are exponential (1s, 2s, 4s, 8s…) capped
 at 8 seconds with up to 0.5s of jitter, so a burst of callers does not retry
 in lockstep. On exhaustion the *original* exception propagates (tenacity's
-`reraise`), so translation still happens in §5.13 and callers still receive
+`reraise`), so translation still happens in section 5.13 and callers still receive
 `ProviderRateLimitError` or `DependencyError`. The adapter's whole
 `embed_documents` call is all-or-nothing: if a middle batch gives up, the
 partial prefix is discarded rather than returned with unknown chunk ids
-missing. The client's own `max_retries=0` (§5.13) remains what makes this
+missing. The client's own `max_retries=0` (section 5.13) remains what makes this
 *one* policy — three retries behind three retries would be nine requests,
 and nobody could reason about the worst case.
 
@@ -1584,31 +1584,31 @@ and nobody could reason about the worst case.
 the operation label, attempt number, wait in seconds, and the exception's
 *type name* — never its message, which for an OpenAI auth failure quotes
 the rejected key. The dependency is `tenacity` (pinned directly in
-`requirements.txt` since this stage; §7.3 updated accordingly).
+`requirements.txt` since this stage; section 7.3 updated accordingly).
 
 **Testing sleeps no seconds.** `with_retries` accepts an injected wait
 strategy and the adapter accepts an injected `retry_wait`, so the retry
 tests run with `wait_none()` and still prove attempt counts,
 classification, exhaustion and log shape; the real exponential schedule was
 exercised outside the suite by running the defaults and timing them. Batching
-happens *inside* the adapter, so the contract suite (§5.12) needs no
+happens *inside* the adapter, so the contract suite (section 5.12) needs no
 change — its registered adapter simply passes texts through the same
 batches a single delegation used to be.
 
 ### 5.15 Embed step (`embeddings/generation.py`) — implemented in Stage 22
 
-§5.2's pipeline reads `load → chunk → embed → upsert`. Loading is
-§5.2.2/§5.2.3 and splitting is §5.11; this is the third arrow:
+section 5.2's pipeline reads `load → chunk → embed → upsert`. Loading is
+section 5.2.2/section 5.2.3 and splitting is section 5.11; this is the third arrow:
 `embed_chunks(embedder, chunks)` takes a document's chunks and returns one
 vector per chunk, in the same order — precisely what the `VectorIndex`
 sketch's `upsert(chunks, vectors)` pairs back. Empty input is an empty
 result, not a provider call, matching the adapter's own short-circuit.
 
 **It is a seam, so it guards the seam.** The adapter validates everything
-it receives (§5.13), but its checks are per *request* while alignment is a
+it receives (section 5.13), but its checks are per *request* while alignment is a
 property of the whole document — batches are joined in this module, so it
 is the only place that sees them all at once. And the contract suite
-(§5.12) proves implementations behave at test time, not at 3 a.m. in
+(section 5.12) proves implementations behave at test time, not at 3 a.m. in
 production, so the two failures that are *silent* still deserve a runtime
 guard: a count mismatch reattaches citation *i* to chunk *j*'s text, and
 mixed dimensions would be rejected by the store far from the cause. Both
@@ -1621,7 +1621,7 @@ class wherever it is first noticed, and `detail` carries ids, never
 content.
 
 **Everything else passes through untouched.** A rate limit that exhausted
-§5.14's retries arrives as `ProviderRateLimitError` and leaves as the same
+section 5.14's retries arrives as `ProviderRateLimitError` and leaves as the same
 instance, so callers handle one error hierarchy regardless of which layer
 noticed first. The single info line carries `doc_id`, `chunk_count` and
 `dimension` — counts only, with or without `LOG_DOCUMENT_CONTENT`.
@@ -1636,11 +1636,11 @@ chunk, against `FakeEmbedder`'s known output.
 
 ### 5.16 Idempotent re-ingestion (`ingestion/pipeline.py`) — implemented in Stage 23
 
-The embedding stages can produce a document's vectors and §5.2.6 can say
+The embedding stages can produce a document's vectors and section 5.2.6 can say
 whether the document needs producing at all. What was missing is the act
 itself — and, specifically, the *second* act: running ingest twice must
 leave the store exactly as running it once did, and re-ingesting an
-edited file must leave only the new version behind. §6.1 states this as a
+edited file must leave only the new version behind. section 6.1 states this as a
 property of the system ("ingestion is idempotent"); this module is where
 it is enforced.
 
@@ -1649,12 +1649,12 @@ it is enforced.
 returns a `DocumentIngestResult` — one of four actions (`created`,
 `replaced`, `skipped`, `failed`) with a stable `code` and counts. It
 catches only `RAGError`; anything else escaping is a defect and is
-allowed to propagate, following §5.2.2's rule.
+allowed to propagate, following section 5.2.2's rule.
 
 **Decide before doing.** `classify` runs first, against the documents the
 pipeline already knows. An unchanged file returns before the chunker, the
 embedder or the store is touched — skipping is what makes re-ingestion
-*cheap*, not merely correct. This is §5.2.6's verdict being *executed*
+*cheap*, not merely correct. This is section 5.2.6's verdict being *executed*
 rather than merely reported.
 
 **Replace, never append.** The write is `delete_document(doc_id)` then
@@ -1667,18 +1667,18 @@ is what makes *retrying* a crash idempotent instead of duplicating.
 
 **All fallible work first, the destructive step last.** Load, chunk and
 embed happen before `delete_document`. If the provider is down and
-§5.14's retries exhaust, the previous version's chunks are still in the
+section 5.14's retries exhaust, the previous version's chunks are still in the
 store — stale beats missing, and the next run simply tries again. What
 remains is the narrow `delete → upsert` window: a crash there leaves the
 document absent until the next run. The planned registry flow closes it
-by marking a document `INDEXED` only *after* a successful upsert (§5.2's
+by marking a document `INDEXED` only *after* a successful upsert (section 5.2's
 sketch), so "not marked" is precisely what tells the next run to redo the
 work.
 
 **The known set is an in-memory registry stand-in.** `IngestPipeline`
 keeps the documents it has written in a private list, seeded from the
 `known` argument; lookups reuse `find_by_doc_id`/`find_by_hash` — named
-after §5.3's registry Protocol on purpose, so Stages 24–27 can swap a
+after section 5.3's registry Protocol on purpose, so Stages 24–27 can swap a
 real `DocumentRegistry` in without changing this module's meaning. A
 failed run is *not* remembered (so it retries) and an empty file is *not*
 remembered (it never became a document). **The one rule seeds must
@@ -1687,20 +1687,20 @@ records the same value, so both sides agree by construction — a caller
 seeding documents hashed over raw file *bytes* would make every file
 read as modified.
 
-**RENAMED is detection, not policy** (§5.2.6). The default here is
+**RENAMED is detection, not policy** (section 5.2.6). The default here is
 `renamed_policy="skip"`: indexing the same bytes under a second path
 doubles every retrieval hit. A caller who knows the second path is a
 deliberate independent copy passes `renamed_policy="ingest"` instead.
 
-**Deviations from §5.2's sketch, stated outright.** `run` takes a
+**Deviations from section 5.2's sketch, stated outright.** `run` takes a
 filesystem path plus an explicit `source_path` rather than only `doc_id`,
 because the caller is the one holding the file — a corpus path in tests,
-§5.3.3's `FileStore.path_for(doc_id)` for an upload (the explicit
+section 5.3.3's `FileStore.path_for(doc_id)` for an upload (the explicit
 identity also stops a machine-specific absolute path from silently
 becoming an id — `make_doc_id` rejects those *before* the file is
-opened). Its result is `DocumentIngestResult` because §5.2.7's service
+opened). Its result is `DocumentIngestResult` because section 5.2.7's service
 already owns `IngestResult`. Document *status* stays `PENDING`:
-lifecycle transitions belong to the registry (§5.3.2), applied by
+lifecycle transitions belong to the registry (section 5.3.2), applied by
 whoever drives it, which is also why outcomes use this module's own
 vocabulary rather than `IngestStatus`.
 
@@ -1717,16 +1717,16 @@ never document text.
 
 ### 5.17 Batch indexing (`ingestion/indexer.py`) — implemented in Stage 28
 
-§5.16's `IngestPipeline` indexes *one* document when someone hands it a
+section 5.16's `IngestPipeline` indexes *one* document when someone hands it a
 file. Nothing yet walked a whole directory, owned the registry row a
-document is supposed to have while work is happening (§6.1), and reported
-on the batch — which is what the `index` command (§5.10) needs.
+document is supposed to have while work is happening (section 6.1), and reported
+on the batch — which is what the `index` command (section 5.10) needs.
 `index_directory(root, *, embedder, store, registry, chunker=None,
 recursive=True)` is that pass: **discover → load → classify → register the
 row → `pipeline.run()` → mark INDEXED or FAILED**, once per supported file,
 returning an `IndexResult` of one `IndexOutcome` per file.
 
-**The row exists before the chunks do.** §6.1's diagram puts `create row
+**The row exists before the chunks do.** section 6.1's diagram puts `create row
 status=PENDING` before the enqueue for a reason — the crash window. A
 process that dies mid-write leaves a row stuck non-terminal, and *that* is
 what tells the next run to redo the document; no row at all says nothing.
@@ -1744,17 +1744,17 @@ load failure retires a non-terminal row to `FAILED`); only the dedup view
 is filtered, so a retry lands as `new` and rewrites cleanly.
 
 **Statuses are recorded in the order they become true.** The lifecycle
-graph (§5.1) forbids `PENDING → INDEXED`, so the walk passes through
+graph (section 5.1) forbids `PENDING → INDEXED`, so the walk passes through
 `PARSING` and `INDEXING`; because the pipeline is one atomic call from the
 outside, both are recorded at the hand-off, and `INDEXED` only *after* the
 write returns. A status write that fails leaves the row at the state it
 actually reached — never `INDEXED` unverified — while `chunk_count` still
 reports what reached the store, because the count describes the store, not
-the status. `FAILED` always carries `code: reason` (§6.1's own shape).
+the status. `FAILED` always carries `code: reason` (section 6.1's own shape).
 
 **No FileStore, stated outright.** A directory named on a command line is
 read in place: copying the corpus into `data/uploads` would double every
-byte on disk for no benefit, and §5.3.3's `FileStore` belongs to the upload
+byte on disk for no benefit, and section 5.3.3's `FileStore` belongs to the upload
 flow on the API side. An emptied or re-broken *previously indexed* file
 likewise keeps its old chunks and its terminal row — removing them is a
 deletion's job, not a batch pass's — with the outcome reporting the problem
@@ -1763,7 +1763,7 @@ build the row, the pipeline re-reads to chunk it) is accepted: correctness
 comes from the replace-then-upsert protocol, and the alternative is a
 redesigned pipeline signature for no measurable gain.
 
-Per-file isolation follows §5.2.5: one broken file never stops the batch,
+Per-file isolation follows section 5.2.5: one broken file never stops the batch,
 and only deliberate `RAGError` is caught — a defect keeps its traceback.
 The pass always returns a result for a valid root, even when every file
 failed (an all-failures batch is information, not an exception); a missing
@@ -1793,7 +1793,7 @@ Client            api                 FileStore   Registry   Queue    worker    
   │ GET /v1/documents/{id} ──▶ 200 {status:"indexed", chunks: 412, pages: 38}
 ```
 
-Failure at any stage → `status=FAILED` with `error` (e.g. `PARSE_ERROR: encrypted pdf`), other documents unaffected. Re-processing the same `doc_id` overwrites chunks (delete-by-`doc_id` then upsert) — ingestion is idempotent (§5.16).
+Failure at any stage → `status=FAILED` with `error` (e.g. `PARSE_ERROR: encrypted pdf`), other documents unaffected. Re-processing the same `doc_id` overwrites chunks (delete-by-`doc_id` then upsert) — ingestion is idempotent (section 5.16).
 
 ### 6.2 Query → grounded answer
 
@@ -2002,7 +2002,7 @@ Coverage gate ≥ 80% on `app/domain`, `app/retrieval/context.py`, `app/generati
 - Secrets: env/secret manager only; never logged. Redact `Authorization`, prompt bodies, and document text from logs.
 - Data residency: document content is sent to OpenAI for embeddings and generation — disclose in the data-flow docs; if unacceptable, the `Embedder`/`AnswerGenerator` Protocols allow a local-model implementation with no code changes elsewhere. Optional zero-retention endpoints for enterprise accounts.
 - Prompt injection: document text is untrusted input — delimit it, instruct the model to ignore instructions inside context, and never let tool/registry actions be driven by model output in v1.
-- Embedded metadata: PDF info-dictionary fields are attacker-controlled strings that reach logs, the API and the vector index, so every value is control-character-stripped, length-capped and scalar-only before storage (§5.2.4).
+- Embedded metadata: PDF info-dictionary fields are attacker-controlled strings that reach logs, the API and the vector index, so every value is control-character-stripped, length-capped and scalar-only before storage (section 5.2.4).
 - Isolation: non-root container, read-only FS except data volumes, no shell in production image, dependency scanning (pip-audit/trivy) in CI.
 
 ## 11. Risks & Cost Levers

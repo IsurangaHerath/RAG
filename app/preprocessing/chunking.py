@@ -22,7 +22,7 @@ Two structures are preserved rather than discarded on the way in:
 
 * **Pages.** A PDF is split *page by page*. That costs the overlap between
   two pages, and buys an exact answer to "which page?" for every chunk —
-  which is the whole reason §5.2.3 kept pages instead of flattening them.
+  which is the whole reason section 5.2.3 kept pages instead of flattening them.
 * **Sections.** Markdown is split at its ATX headings first, so each chunk
   can say which heading it sat under — as the full path from the document
   title down (``Endpoints > GET /payments/{id}``), because two sections
@@ -44,11 +44,11 @@ order, same ids. Nothing here reads a clock or a random source, so
 re-ingesting an untouched file overwrites the same ``chunk_id`` values
 rather than appending a second copy of every chunk.
 
-Deviation from the §5.2 Protocol sketch
+Deviation from the section 5.2 Protocol sketch
 ---------------------------------------
-The protocol block in §5.2 was written before Stages 11-12 and describes
+The protocol block in section 5.2 was written before Stages 11-12 and describes
 loaders returning ``list[LCDocument]``; what was actually built (and what
-§5.2.2/§5.2.3 document) is the native :class:`TextDocument` /
+section 5.2.2/section 5.2.3 document) is the native :class:`TextDocument` /
 :class:`PdfDocument` pair. This module takes those directly, so the call
 site the pipeline will use is ``chunker.split(loader.load(...), doc_id=...)``
 with no conversion step in between — and LangChain's document type stays an
@@ -101,7 +101,7 @@ _FENCE_RE = re.compile(r"^[ \t]*(?:```|~~~)")
 class RecursiveChunker:
     """Split a loaded document into overlapping, size-bounded chunks.
 
-    The implementation of §5.2's ``Chunker`` interface, named after the
+    The implementation of section 5.2's ``Chunker`` interface, named after the
     splitting strategy rather than the interface itself so a second
     strategy (page-per-chunk for citations, say) could sit beside it
     without either being called "the" chunker.
@@ -299,7 +299,7 @@ def _base_metadata(
 ) -> dict[str, str | int | float | bool]:
     """Provenance every chunk inherits, whatever the source.
 
-    These two keys exist because §5.3's storage schema lists them as chunk
+    These two keys exist because section 5.3's storage schema lists them as chunk
     metadata; attaching them here means the indexing stage copies what it
     is given instead of reconstructing it from elsewhere.
     """
@@ -318,7 +318,7 @@ def _fold_leading_heading(text: str, pieces: list[str]) -> list[str]:
     **This is the one place a chunk may exceed ``chunk_size``**, by exactly
     the length of its heading line. That is a deliberate trade: the size is
     a quality target rather than a hard ceiling (embeddings accept far more
-    than 1000 characters, and §5.4 counts tokens when assembling a prompt),
+    than 1000 characters, and section 5.4 counts tokens when assembling a prompt),
     and a paragraph wearing its own heading is worth more than the bound is.
     A chunk with no heading to glue never overshoots.
 

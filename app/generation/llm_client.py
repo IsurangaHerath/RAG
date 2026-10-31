@@ -1,4 +1,4 @@
-"""LLM adapter wrapper (§5.5, `generation/llm_client.py`).
+"""LLM adapter wrapper (section 5.5, `generation/llm_client.py`).
 
 Not a direct OpenAI import exposed to the rest of the app: callers ask
 for `LLMClient`, which builds its client from `Settings` (the same
@@ -7,12 +7,12 @@ client exists, so a missing key fails with a `ConfigurationError`
 rather than a 401 from the API). Errors are mapped into the shared
 hierarchy (`ProviderAuthenticationError`, `ProviderRateLimitError`,
 `DependencyError` `dependency_unavailable`) so one alert rule catches
-provider failures wherever they appear (§5.15, §5.3 error-policy
+provider failures wherever they appear (section 5.15, section 5.3 error-policy
 consistency).
 
 The adapter does not embed — embedding lives in `app.embeddings` — and
 does not retrieve; it turns the message list built by the prompt layer
-(§5.5, `prompts.py`) into the assistant response that
+(section 5.5, `prompts.py`) into the assistant response that
 `GroundedAnswerPipeline.answer()` parses. The separation is deliberate:
 changing the LLM provider is an import change at this file, not a
 refactor across generation, retrieval and ingestion.
@@ -22,7 +22,7 @@ authentication error quotes (part of) the credential it rejected, so
 only the exception class name and HTTP status survive translation. The
 original exception still rides along as ``__cause__`` for anyone who
 deliberately inspects it. This is the same rule the embedding adapter
-follows (§5.13).
+follows (section 5.13).
 """
 
 from __future__ import annotations
@@ -121,7 +121,7 @@ class LLMClient:
 
     The `ChatOpenAI` instance is created lazily (first `generate_messages`
     call) and only after `require_openai_key()` succeeds — the same
-    pattern `OpenAIEmbedder.from_settings()` uses (§5.13), so a missing
+    pattern `OpenAIEmbedder.from_settings()` uses (section 5.13), so a missing
     key always raises `ConfigurationError` before any network request.
 
     Parameters

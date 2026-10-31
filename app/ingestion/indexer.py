@@ -1,8 +1,8 @@
 """Batch indexing: the pass that turns a directory into indexed documents (Stage 28).
 
-§5.16's ``IngestPipeline`` indexes *one* document when someone hands it a
+section 5.16's ``IngestPipeline`` indexes *one* document when someone hands it a
 file. Nothing yet walks a whole directory, owns the registry row a document
-is supposed to have while work is happening (§6.1), and reports on the
+is supposed to have while work is happening (section 6.1), and reports on the
 batch — which is exactly what the upcoming ``index`` command needs, and
 what this module provides.
 
@@ -14,7 +14,7 @@ One pass, six acts per file::
 Three decisions are worth spelling out, because each could reasonably have
 gone the other way.
 
-**The row exists before the chunks do.** §6.1's diagram puts ``create row
+**The row exists before the chunks do.** section 6.1's diagram puts ``create row
 status=PENDING`` on the API's side of the enqueue, and the reason is the
 crash window: a process that dies mid-write leaves a row stuck
 non-terminal, and *that* is what tells the next run to redo the document;
@@ -41,12 +41,12 @@ makes a crash recoverable. ``FAILED`` always carries ``code: reason``.
 What this module deliberately does *not* do: no file store. A directory
 named on a command line is read in place — copying the corpus into
 ``data/uploads`` would double every byte on disk for no benefit, and
-§6.1's ``FileStore`` belongs to the upload flow on the API side. An emptied
+section 6.1's ``FileStore`` belongs to the upload flow on the API side. An emptied
 or re-broken *previously indexed* file likewise keeps its old chunks and
 its terminal row: removing them is a deletion's job, not a batch pass's,
 and the outcome reports the problem either way.
 
-Per-file isolation follows §5.2.5: one broken file never stops the batch,
+Per-file isolation follows section 5.2.5: one broken file never stops the batch,
 and only deliberate :class:`~app.domain.errors.RAGError` is caught — a
 defect keeps its traceback. Nothing here touches the network unless the
 caller passes an embedder that does.
@@ -250,7 +250,7 @@ class IndexResult:
     def decisions(self) -> tuple[DedupDecision, ...]:
         """The deduplication verdicts for files that had text to classify.
 
-        In batch order — what §5.2.7's report tallies when it is given
+        In batch order — what section 5.2.7's report tallies when it is given
         ``decisions``.
         """
         return tuple(outcome.decision for outcome in self.outcomes if outcome.decision is not None)
@@ -281,7 +281,7 @@ def index_directory(
 ) -> IndexResult:
     """Discover, classify and index every supported file under ``root``.
 
-    The batch orchestration the storage slice (§5.3) and §5.16's pipeline
+    The batch orchestration the storage slice (section 5.3) and section 5.16's pipeline
     were built to serve: discovery decides *which* files, the loader
     decides *what is in them*, deduplication decides *whether anything is
     needed*, and the pipeline does the writing while the registry records
@@ -292,16 +292,16 @@ def index_directory(
     root:
         Directory to scan.
     embedder:
-        §5.12's contract — one shared instance for the whole batch, so a
+        section 5.12's contract — one shared instance for the whole batch, so a
         provider sees one client and batching stays coherent.
     store:
-        Where chunks land (§5.3's write path).
+        Where chunks land (section 5.3's write path).
     registry:
         Where document rows live; also the source both classification and
         status reporting read from.
     chunker:
         Anything with :meth:`~app.ingestion.pipeline.ChunkSplitter.split`.
-        ``None`` means §5.11's default chunker, whose defaults mirror
+        ``None`` means section 5.11's default chunker, whose defaults mirror
         ``Settings`` — the same choice the pipeline makes.
     recursive:
         Whether to descend into subdirectories.
@@ -328,7 +328,7 @@ def index_directory(
     Notes
     -----
     Per-file problems never raise: they become ``failed`` outcomes with
-    stable codes, exactly as §5.2.5's service does. Caller errors (a bad
+    stable codes, exactly as section 5.2.5's service does. Caller errors (a bad
     ``root``) and infrastructure errors (a dead registry) propagate — the
     caller is the one who can act on those.
     """
@@ -386,7 +386,7 @@ def _all_records(registry: DocumentRegistry) -> list[Document]:
 def _error_line(code: str | None, reason: str | None) -> str:
     """One line for the registry's ``error`` column: ``code: reason``.
 
-    §6.1's own example shape (``PARSE_ERROR: encrypted pdf``). Always
+    section 6.1's own example shape (``PARSE_ERROR: encrypted pdf``). Always
     non-empty, because the lifecycle refuses a ``FAILED`` transition with
     no message.
     """
@@ -414,7 +414,7 @@ def _retire_stalled_row(
     truthful terminal record instead of a promise.
 
     A row that is already terminal stays exactly as it is: the lifecycle
-    deliberately forbids nudging a finished document (§5.1), and the load
+    deliberately forbids nudging a finished document (section 5.1), and the load
     failure is reported through the outcome regardless. If even this
     transition fails, the row's current status is returned rather than
     masked — the outcome carries the load failure, which is the fact the
@@ -510,7 +510,7 @@ def _index_one(
     )
 
     # Register BEFORE writing: this ordering is the crash window's whole
-    # story (§6.1), and a registry that refuses the row stops *this*
+    # story (section 6.1), and a registry that refuses the row stops *this*
     # document before a single chunk can be orphaned without one.
     try:
         registry.create(document)

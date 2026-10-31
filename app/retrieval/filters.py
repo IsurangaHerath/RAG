@@ -1,4 +1,4 @@
-"""Validated metadata filtering (§5.4, Stage 33) — `filters.py`.
+"""Validated metadata filtering (section 5.4, Stage 33) — `filters.py`.
 
 The `retriever.py` read path (Stage 31) forwards a `MetadataFilter` to
 `ChromaIndex.similarity_search` without validating its contents — that is
@@ -6,13 +6,13 @@ deliberate separation: the index knows nothing about which operators or
 value shapes are legal (that is a retrieval-layer policy, not a storage
 property), and `similarity_search` translates any malformed `where` clause
 into a `ValidationError` (`invalid_filter`) with chroma's message
-preserved (§5.3.5).
+preserved (section 5.3.5).
 
 This file enforces the legal shape *before* it reaches chroma, so callers
 get a typed, actionable error (`invalid_filter`) rather than relying on
 chroma's internal validation message. The allowed operators and value
 types match chroma's ``where`` clause contract empirically verified
-against the installed version (§5.3.5's error-policy notes):
+against the installed version (section 5.3.5's error-policy notes):
 
     Operators: $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin,
                $contains, $not_contains
@@ -37,7 +37,7 @@ from app.domain.models import MetadataFilter
 __all__ = ["VALID_WHERE_OPERATORS", "FilterValidator", "validate_filter"]
 
 #: The ``where`` clause operators chroma's installed version accepts
-#: (verified empirically; see §5.3.5 error-policy notes).
+#: (verified empirically; see section 5.3.5 error-policy notes).
 VALID_WHERE_OPERATORS: frozenset[str] = frozenset(
     {
         "$eq",
@@ -186,7 +186,7 @@ def validate_filter(filter: MetadataFilter | None) -> None:
     """Module-level convenience: validate a filter or pass silently.
 
     ``None`` means no constraint and is always valid; anything else is
-    validated as a `MetadataFilter` mapping (§5.3). This function is the
+    validated as a `MetadataFilter` mapping (section 5.3). This function is the
     entry point the retrieval layer calls before passing a filter to
     `similarity_search` (Stage 30), so an invalid filter fails here with a
     typed `ValidationError` (`invalid_filter`) rather than reaching

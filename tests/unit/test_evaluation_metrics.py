@@ -1,4 +1,4 @@
-"""Tests for the evaluation metrics (Â§5.8, Stages 45â€“52).
+"""Tests for the evaluation metrics (Âsection 5.8, Stages 45â€“52).
 
 Every metric is a pure function: no network, no model, no mutable state.
 These tests pin the arithmetic contracts â€” a perfect ranking scores 1.0,
