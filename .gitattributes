@@ -1,0 +1,14 @@
+# Keep every text file LF in the working tree, on every platform.
+# Git for Windows defaults to core.autocrlf=true, which would otherwise
+# check files out as CRLF while the repository stores LF - making
+# `ruff format --check` fail on a clean clone even though CI passes.
+* text=auto eol=lf
+
+# Binary fixtures must never be line-ending converted.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
