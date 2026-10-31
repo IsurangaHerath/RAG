@@ -126,10 +126,8 @@ def test_inspection_never_leaks_full_text_to_context(index, embedder) -> None:
 
 
 def test_chain_retrieves_and_assembles_context(index, embedder) -> None:
-    try:
-        from app.generation.chain import GroundedAnswerPipeline
-    except ModuleNotFoundError:
-        pytest.skip("langchain_chat_models not installed")
+    from app.generation.chain import GroundedAnswerPipeline
+
     pipeline = GroundedAnswerPipeline(index=index)
     context = pipeline.retrieve_context("payments", filter_applied=None, k=2, budget_tokens=3000)
     assert len(context.chunks) > 0
@@ -137,10 +135,7 @@ def test_chain_retrieves_and_assembles_context(index, embedder) -> None:
 
 
 def test_chain_builds_prompt_from_context(index, embedder) -> None:
-    try:
-        from app.generation.chain import GroundedAnswerPipeline
-    except ModuleNotFoundError:
-        pytest.skip("langchain_chat_models not installed")
+    from app.generation.chain import GroundedAnswerPipeline
 
     pipeline = GroundedAnswerPipeline(index=index)
     messages = pipeline.build_prompt("payments", filter_applied=None, k=2, budget_tokens=3000)

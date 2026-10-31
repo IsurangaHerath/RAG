@@ -1,37 +1,42 @@
-"""The full query pipeline — retrieve → assemble → prompt → generate (§5.5, Stage 37+).
+"""The full query pipeline: retrieve -> assemble -> prompt -> generate (§5.5, §6.2).
 
-Not an endpoint (§5.6): this module connects the stages the user has
-been building (retrieval: 30-35; generation: 36), producing an
-`GroundedContext` and a prompt that the `LLMClient` (Stage 37, `llm_client.py`)
-can turn into an answer. The concrete `GroundedAnswerPipeline` runs:
+Not an endpoint (§5.6): this module connects retrieval (Stages 30-35),
+context assembly (Stage 36), prompt construction, the `LLMClient` adapter
+and citation verification into one object. The concrete
+`GroundedAnswerPipeline` runs:
 
-    query → RetrievalQuery (optional filter) → MMRRetriever.retrieve
-    → SimpleContextBuilder.build → GroundingPromptBuilder.build
-    → LLMClient.generate_messages
+    query -> RetrievalQuery (optional filter) -> MMRRetriever.retrieve
+          -> SimpleContextBuilder.build -> GroundingPromptBuilder.build
+          -> LLMClient.generate_messages -> validate_citations
+          -> Answer
 
-No live LLM is called in this file; the concrete pipeline is designed
-for offline demonstration, evaluation, and CI — the same constraint
-that applies to `retriever.py`, `scoring.py`, and `diagnostics.py`.
-A real deployment would inject a live `LLMClient` (built from settings
-with `require_openai_key()`); the pipeline stays unchanged.
+The pipeline can stop at any leg deliberately: `retrieve_context()` returns
+the evidence, `build_prompt()` returns the messages, and `answer()` performs
+the model call and verifies its citations. That split keeps evaluation
+harnesses and CLI demonstrations offline: they can use the first two
+without a live model.
 
-Error policy: every stage raises typed `RAGError` subclasses (`ValidationError`
-for bad input; `ConfigurationError` for missing embedder/LLM; `DependencyError`
-for provider failures) so a single `try/except` at the API layer (§5.6)
-produces one RFC7807-style response regardless of where the failure
-occurred.
+Error policy: every stage raises typed `RAGError` subclasses
+(`ValidationError` for bad input; `ConfigurationError` for a missing
+embedder/LLM; `DependencyError` for provider failures) so a single
+`try/except` at the API layer (§5.6) produces one RFC7807-style response
+regardless of where the failure occurred. An answer that cites a passage
+outside the retrieved context raises `ValidationError` (`invalid_citation`)
+rather than being returned as if it were verified.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Protocol
 
 from langchain_core.messages import BaseMessage
 
-from app.domain.errors import ConfigurationError, ValidationError
-from app.domain.models import GroundedContext
+from app.domain.errors import ConfigurationError, DependencyError, ValidationError
+from app.domain.models import Answer, Citation, GroundedContext
+from app.generation.citations import validate_citations
 from app.generation.context_builder import SimpleContextBuilder
-from app.generation.llm_client import LLMClient
+from app.generation.llm_client import LLMClientProtocol
 from app.generation.prompts import GroundingPromptBuilder
 from app.retrieval.filters import validate_filter
 from app.retrieval.retriever import MMRRetriever, RetrievalQuery
@@ -40,10 +45,41 @@ from app.storage.chroma import ChromaIndex
 __all__ = ["GroundedAnswerPipeline", "QueryPipeline"]
 
 
-class QueryPipeline(Protocol):
-    """The full §6.2 flow: validate → retrieve → assemble → prompt."""
+def _response_text(messages: Sequence[BaseMessage]) -> str:
+    """Join the text of the assistant's response messages.
 
-    def run(
+    LangChain messages carry either a string or a list of content blocks
+    (text, tool calls, images). Only text blocks become answer text; a
+    response with none at all is provider trouble, not an empty answer,
+    because returning ``""`` would be indistinguishable from a model that
+    deliberately said nothing.
+    """
+    parts: list[str] = []
+    for message in messages:
+        content = message.content
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    value = block.get("text")
+                    if isinstance(value, str):
+                        parts.append(value)
+    text = "\n".join(part.strip() for part in parts if part.strip())
+    if not text:
+        raise DependencyError(
+            "The language model returned no answer text",
+            code="empty_llm_response",
+        )
+    return text
+
+
+class QueryPipeline(Protocol):
+    """The full §6.2 flow: retrieve -> assemble -> prompt -> answer."""
+
+    def retrieve_context(
         self,
         query: str,
         *,
@@ -52,28 +88,47 @@ class QueryPipeline(Protocol):
         budget_tokens: int = 3000,
     ) -> GroundedContext: ...
 
+    def build_prompt(
+        self,
+        query: str,
+        *,
+        filter_applied: dict[str, Any] | None = None,
+        k: int = 20,
+        budget_tokens: int = 3000,
+    ) -> list[BaseMessage]: ...
+
+    def answer(
+        self,
+        query: str,
+        *,
+        filter_applied: dict[str, Any] | None = None,
+        k: int = 20,
+        budget_tokens: int = 3000,
+        history: Sequence[str] | None = None,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> Answer: ...
+
 
 class GroundedAnswerPipeline:
-    """Concrete pipeline wiring all prior stages (§5.3-§5.5, §6.2).
+    """Concrete pipeline wiring retrieval, prompting, generation and checking.
 
     Holds the `ChromaIndex` (Stage 30, read + write), the `Embedder`
-    (shared with index for same-space embeddings, §5.3.5), the
+    (shared with the index for same-space embeddings, §5.3.5), the
     `MMRRetriever` (Stage 31), `SimpleContextBuilder` (Stage 36),
-    `GroundingPromptBuilder` (§5.5, `prompts.py`), and an optional
-    `LLMClient` (Stage 37). All can be injected; defaults build from
-    `Settings` when available.
+    `GroundingPromptBuilder` (§5.5), and an optional `LLMClient`. All can
+    be injected; the retriever reuses the index's embedder by design.
 
-    The pipeline does not call the live LLM by default (`LLMClient` can
-    be `None`); when `None`, `run()` stops at the `GroundedContext` stage
-    and returns it, which is exactly what evaluation harnesses
-    (§5.8) and the CLI demonstration need.
+    `llm_client` may be `None` for the offline legs: `retrieve_context()`
+    and `build_prompt()` still work, while `answer()` raises a typed
+    `ConfigurationError` instead of pretending a model exists.
     """
 
     def __init__(
         self,
         index: ChromaIndex,
-        llm_client: LLMClient | None = None,
-        embedder: object = None,
+        llm_client: LLMClientProtocol | None = None,
+        embedder: object | None = None,
     ) -> None:
         if index._embedder is None:
             raise ConfigurationError(
@@ -82,7 +137,8 @@ class GroundedAnswerPipeline:
             )
         # The retriever uses the index's embedder (§5.3.5); the pipeline
         # does not create a separate one, so query and chunk embeddings
-        # stay in the same space.
+        # stay in the same space. `embedder` is accepted for callers that
+        # already hold one, but the index's own instance wins.
         self._retriever = MMRRetriever(index=index, embedder=index._embedder)
         self._builder = SimpleContextBuilder()
         self._prompt_builder = GroundingPromptBuilder()
@@ -96,13 +152,13 @@ class GroundedAnswerPipeline:
         k: int = 20,
         budget_tokens: int = 3000,
     ) -> GroundedContext:
-        """Retrieve and assemble evidence (§6.2); does not call LLM.
+        """Retrieve and assemble evidence (§6.2); does not call the LLM.
 
-        Returns the `GroundedContext` with citation mapping, chunk previews,
+        Returns the `GroundedContext` with citation mapping, chunk texts,
         and budget applied. A caller that only needs the evidence (e.g.
-        evaluation harness, CLI demonstration) can stop here; a caller
-        that needs an answer passes the context to `LLMClient.generate_messages()`
-        through the prompt layer (§5.5).
+        an evaluation harness, CLI demonstration) can stop here; a caller
+        that needs an answer passes the context through the prompt layer
+        to the model (§5.5).
         """
         # Same validation as the retrieval layer (§5.4, Stage 33).
         validate_filter(filter_applied)
@@ -131,16 +187,61 @@ class GroundedAnswerPipeline:
         filter_applied: dict[str, Any] | None = None,
         k: int = 20,
         budget_tokens: int = 3000,
+        history: Sequence[str] | None = None,
     ) -> list[BaseMessage]:
-        """Full §6.2 flow through `GroundedContext`; does not call LLM.
-
-        Returns the `list[BaseMessage]` that `LLMClient.generate_messages()`
-        consumes (§5.5, `llm_client.py`). A caller that wants an actual
-        answer must pass these messages to the LLM adapter; this method
-        stops at prompt assembly so the pipeline can be tested offline
-        without a live model (same constraint as `retriever.py`, `scoring.py`).
-        """
+        """Full §6.2 flow through `GroundedContext`; does not call the LLM."""
         context = self.retrieve_context(
             query, filter_applied=filter_applied, k=k, budget_tokens=budget_tokens
         )
-        return self._prompt_builder.build(query=query, ctx=context)
+        return self._prompt_builder.build(query=query, ctx=context, history=history)
+
+    def answer(
+        self,
+        query: str,
+        *,
+        filter_applied: dict[str, Any] | None = None,
+        k: int = 20,
+        budget_tokens: int = 3000,
+        history: Sequence[str] | None = None,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> Answer:
+        """Generate an answer and verify every citation it makes.
+
+        The returned `Answer` carries the model's text, the passages its
+        ``[n]`` markers resolved to, and the checker's verdict. A faithful
+        abstention and an uncited answer are returned with
+        ``grounded=False``; a marker that names no retrieved chunk raises
+        `ValidationError` (`invalid_citation`) because that answer presents
+        invented evidence as verified.
+        """
+        if self._llm is None:
+            raise ConfigurationError(
+                "Answer generation requires an LLM client; construct "
+                "GroundedAnswerPipeline(llm_client=...)",
+                code="llm_not_configured",
+            )
+
+        context = self.retrieve_context(
+            query, filter_applied=filter_applied, k=k, budget_tokens=budget_tokens
+        )
+        messages = self._prompt_builder.build(query=query, ctx=context, history=history)
+        responses = self._llm.generate_messages(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        text = _response_text(responses)
+        check = validate_citations(text, context)
+
+        return Answer(
+            query=query,
+            text=text,
+            citations=tuple(
+                Citation.from_chunk(marker, context.citation_mapping[marker])
+                for marker in check.markers
+            ),
+            grounded=check.grounded,
+            abstained=check.abstained,
+            reason=check.reason,
+        )

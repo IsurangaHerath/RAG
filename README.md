@@ -1,12 +1,13 @@
 # Technical Document Intelligence — RAG
 
-> **Status: retrieval and citation verification implemented; live answer
-> generation is the remaining wiring.** Storage (§5.3), retrieval (§5.4),
-> context assembly and prompt construction, the LLM adapter, and
-> programmatic citation checking are built and tested offline. No live
-> OpenAI call is made by the suite, and retrieval accuracy, answer
-> quality, latency and API cost are **not yet measured**.
-> **1087 tests passing** (0 failures, all offline).
+> **Status: answer generation is wired — citation-verified `Answer` objects,
+> `ChatOpenAI` adapter, and full context evidence (§5.5) are implemented.**
+> Storage (§5.3), retrieval (§5.4), citation parsing/verification (§5.5),
+> and the query pipeline (§6.2) are built and tested offline. The live LLM
+> adapter works (stubbed in CI); no real OpenAI call is made by the suite,
+> and retrieval accuracy, answer quality, latency and API cost are
+> **not yet measured**.
+> **1150 tests passing** (0 failures, all offline — 63 new).
 > See [Project status](#project-status) for exactly what does and does not work.
 
 A Retrieval-Augmented Generation (RAG) system for technical documents: upload

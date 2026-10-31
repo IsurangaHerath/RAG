@@ -18,6 +18,7 @@ from collections.abc import Callable, Sequence
 from types import SimpleNamespace
 
 import openai
+from langchain_core.messages import AIMessage, BaseMessage
 
 from app.domain.errors import ValidationError
 from app.domain.models import Chunk
@@ -26,6 +27,7 @@ from app.embeddings.base import require_embedding_text
 __all__ = [
     "FakeChunkStore",
     "FakeEmbedder",
+    "FakeLLMClient",
     "StubEmbeddings",
     "openai_connection_error",
     "openai_status_error",
@@ -190,6 +192,39 @@ def openai_connection_error(*, message: str = "Connection error.") -> openai.API
         message=message,
         request=SimpleNamespace(url="https://api.openai.com/v1/embeddings"),  # type: ignore[arg-type]
     )
+
+
+class FakeLLMClient:
+    """Offline stand-in for `LLMClient`'s one public method.
+
+    Records the exact arguments of every call so tests can prove the
+    pipeline forwarded the prompt, temperature and token budget rather
+    than silently using defaults. ``reply`` is either the answer text or
+    ready-made messages (to exercise content-block parsing); ``None``
+    models a provider that returned nothing.
+    """
+
+    def __init__(self, reply: str | Sequence[BaseMessage] | None = None) -> None:
+        self.reply = reply
+        self.error: BaseException | None = None
+        self.calls: list[tuple[list[BaseMessage], float, int | None]] = []
+
+    def generate_messages(
+        self,
+        messages: list[BaseMessage],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> list[BaseMessage]:
+        """Return the configured reply, or raise the configured failure."""
+        self.calls.append((list(messages), temperature, max_tokens))
+        if self.error is not None:
+            raise self.error
+        if self.reply is None:
+            return []
+        if isinstance(self.reply, str):
+            return [AIMessage(content=self.reply)]
+        return list(self.reply)
 
 
 class FakeChunkStore:

@@ -29,7 +29,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -216,6 +216,40 @@ def _validate_metadata(metadata: Mapping[str, str | int | float | bool]) -> None
                 f"index.",
                 code="invalid_metadata_value",
             )
+
+
+def _validate_chunk_identity(chunk_id: str, doc_id: str) -> None:
+    """Check that a chunk id really belongs to ``doc_id``.
+
+    Shared by :class:`RetrievedChunk` and :class:`Citation`: both name a
+    stored chunk, and neither may invent an id the index never wrote. A
+    citation is the more dangerous of the two to get wrong, so it uses
+    exactly the same rule rather than a looser copy.
+    """
+    _require(doc_id, "doc_id")
+    if not _DOC_ID_RE.match(doc_id):
+        raise ValidationError(
+            f"doc_id must look like 'doc_' + 16 hex chars, got {doc_id!r}",
+            code="invalid_doc_id",
+        )
+
+    _require(chunk_id, "chunk_id")
+    owner, separator, position = chunk_id.partition(":")
+    if not (separator and owner == doc_id and position.isdigit()):
+        raise ValidationError(
+            f"chunk_id must look like '{doc_id}:<index>', got {chunk_id!r}",
+            code="invalid_chunk_id",
+        )
+    expected = make_chunk_id(doc_id, int(position))
+    if chunk_id != expected:
+        # The shape check above accepts a zero-padded suffix
+        # ("doc_...:007"), which decodes to the same index yet is not
+        # the id this document's chunks are written under; re-deriving
+        # catches what pattern-matching cannot.
+        raise ValidationError(
+            f"chunk_id must be {expected!r} for this doc_id and index, got {chunk_id!r}",
+            code="invalid_chunk_id",
+        )
 
 
 # --- The model ----------------------------------------------------------------
@@ -704,30 +738,7 @@ class RetrievedChunk:
         _validate_metadata(self.metadata)
         object.__setattr__(self, "metadata", dict(self.metadata))
 
-        _require(self.doc_id, "doc_id")
-        if not _DOC_ID_RE.match(self.doc_id):
-            raise ValidationError(
-                f"doc_id must look like 'doc_' + 16 hex chars, got {self.doc_id!r}",
-                code="invalid_doc_id",
-            )
-
-        _require(self.chunk_id, "chunk_id")
-        owner, separator, position = self.chunk_id.partition(":")
-        if not (separator and owner == self.doc_id and position.isdigit()):
-            raise ValidationError(
-                f"chunk_id must look like '{self.doc_id}:<index>', got {self.chunk_id!r}",
-                code="invalid_chunk_id",
-            )
-        expected = make_chunk_id(self.doc_id, int(position))
-        if self.chunk_id != expected:
-            # The shape check above accepts a zero-padded suffix
-            # ("doc_...:007"), which decodes to the same index yet is not
-            # the id this document's chunks are written under; re-deriving
-            # catches what pattern-matching cannot.
-            raise ValidationError(
-                f"chunk_id must be {expected!r} for this doc_id and index, got {self.chunk_id!r}",
-                code="invalid_chunk_id",
-            )
+        _validate_chunk_identity(self.chunk_id, self.doc_id)
 
         _require(self.content, "content")
 
@@ -843,10 +854,190 @@ class GroundedContext:
         return json.dumps(self.to_dict(), indent=indent)
 
 
+# --- Answers and their sources (generation -> API) -------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Citation:
+    """One resolved ``[n]`` marker in a generated answer.
+
+    The marker is what the reader sees; the ids are what the system can
+    check. Keeping both together is the point: an answer can claim
+    ``[2]``, and this record proves which stored chunk that number meant.
+
+    ``filename``/``page``/``section`` are copied from the chunk's metadata
+    rather than looked up later, so a citation stays readable even if the
+    retrieval result is discarded. They are optional because not every
+    source has a page (Markdown) or a section (text before a heading).
+    """
+
+    marker: int
+    chunk_id: str
+    doc_id: str
+    filename: str | None = None
+    page: int | None = None
+    section: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the marker and the chunk identity once, at construction."""
+        if isinstance(self.marker, bool) or not isinstance(self.marker, int) or self.marker < 1:
+            raise ValidationError(
+                f"citation marker must be an integer >= 1, got {self.marker!r}",
+                code="invalid_citation_marker",
+            )
+        _validate_chunk_identity(self.chunk_id, self.doc_id)
+
+        if self.filename is not None and (
+            not isinstance(self.filename, str) or not self.filename.strip()
+        ):
+            raise ValidationError(
+                "citation filename must be a non-empty string when present",
+                code="invalid_filename",
+            )
+        if self.page is not None and (
+            isinstance(self.page, bool) or not isinstance(self.page, int) or self.page < 1
+        ):
+            raise ValidationError(
+                f"citation page must be an integer >= 1 when present, got {self.page!r}",
+                code="invalid_page",
+            )
+        if self.section is not None and (
+            not isinstance(self.section, str) or not self.section.strip()
+        ):
+            raise ValidationError(
+                "citation section must be a non-empty string when present",
+                code="invalid_section",
+            )
+
+    @classmethod
+    def from_chunk(cls, marker: int, chunk: RetrievedChunk) -> Citation:
+        """Build the citation for *marker* pointing at *chunk*.
+
+        The marker and chunk identity are validated by ``__post_init__``;
+        provenance is copied, never inferred, so a citation cannot name a
+        page the chunk did not carry.
+        """
+        return cls(
+            marker=marker,
+            chunk_id=chunk.chunk_id,
+            doc_id=chunk.doc_id,
+            filename=chunk.filename,
+            page=chunk.page,
+            section=chunk.section,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe citation record (no chunk text)."""
+        return {
+            "marker": self.marker,
+            "chunk_id": self.chunk_id,
+            "doc_id": self.doc_id,
+            "filename": self.filename,
+            "page": self.page,
+            "section": self.section,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Answer:
+    """A generated answer plus the sources it resolved and its verdict.
+
+    ``grounded`` is the checker's verdict, not a claim the model makes
+    about itself: it is true only when every ``[n]`` marker resolved to a
+    chunk in the context and the answer did not abstain. ``abstained``
+    marks the faithful "not enough information" reply, which is a valid
+    outcome rather than a failure. ``reason`` carries the checker's
+    machine-readable explanation when ``grounded`` is false.
+
+    Citations are stored as a tuple so an answer cannot be edited after
+    validation by appending a plausible-looking source. The record keeps
+    the answer text because that is the product; ``summary()`` is the
+    log-safe view that omits it.
+    """
+
+    query: str
+    text: str
+    citations: tuple[Citation, ...] = ()
+    grounded: bool = False
+    abstained: bool = False
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the answer and enforce the citation/grounding invariants."""
+        _require(self.query, "query")
+        _require(self.text, "text")
+
+        if not isinstance(self.citations, Sequence):
+            raise ValidationError(
+                "citations must be a sequence of Citation records",
+                code="invalid_citations",
+            )
+        citations = tuple(self.citations)
+        for citation in citations:
+            if not isinstance(citation, Citation):
+                raise ValidationError(
+                    f"citations must contain Citation records, got {type(citation).__name__}",
+                    code="invalid_citations",
+                )
+        markers = [citation.marker for citation in citations]
+        if len(set(markers)) != len(markers):
+            raise ValidationError(
+                "each citation marker may appear only once per answer",
+                code="duplicate_citation_marker",
+            )
+        object.__setattr__(self, "citations", citations)
+
+        if self.grounded and not citations:
+            raise ValidationError(
+                "a grounded answer must cite at least one source",
+                code="invalid_grounding",
+            )
+        if self.grounded and self.abstained:
+            raise ValidationError(
+                "an answer cannot be both grounded and abstained",
+                code="invalid_grounding",
+            )
+        if self.reason is not None and (
+            not isinstance(self.reason, str) or not self.reason.strip()
+        ):
+            raise ValidationError(
+                "reason must be a non-empty string when present",
+                code="invalid_reason",
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe answer, citations included."""
+        return {
+            "query": self.query,
+            "text": self.text,
+            "citations": [citation.to_dict() for citation in self.citations],
+            "grounded": self.grounded,
+            "abstained": self.abstained,
+            "reason": self.reason,
+        }
+
+    def summary(self) -> dict[str, Any]:
+        """Return the log-safe view: no answer text, only its shape.
+
+        The text is what a user is quoted; like every other ``summary`` in
+        this module it stays out of logs and console reports.
+        """
+        return {
+            "query": self.query,
+            "char_count": len(self.text),
+            "citations": [citation.to_dict() for citation in self.citations],
+            "grounded": self.grounded,
+            "abstained": self.abstained,
+            "reason": self.reason,
+        }
+
+
 __all__ = [
     "EXTENSION_TO_MEDIA_TYPE",
     "SUPPORTED_MEDIA_TYPES",
+    "Answer",
     "Chunk",
+    "Citation",
     "Document",
     "IngestStatus",
     "MetadataFilter",

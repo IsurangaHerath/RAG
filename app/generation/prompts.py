@@ -54,13 +54,15 @@ class GroundingPromptBuilder:
     The system message carries the rules (`ARCHITECTURE.md` §5.5): answer
     only from the context; cite `[n]` markers; abstain when evidence is
     missing. The user message includes the question and the evidence blocks
-    in provenance order (filename, page, chunk id, truncated text) — never
-    the full chunk text (redacted by `GroundedContext.to_dict()` preview,
-    `RETRIEVAL_INSPECTION_MAX_PREVIEW` = 200 chars, §5.9).
+    in provenance order (filename, page, chunk id, full passage text) — the
+    text is already budget-truncated by `SimpleContextBuilder`, so sending
+    only a preview here would withhold the very sentences the model was
+    asked to ground its answer in. Log/preview redaction lives in
+    `GroundedContext.to_dict()` and `RetrievedChunk.summary()`, not here.
 
-    The citation mapping (`[1]` -> chunk) is included in the prompt so the
-    model's response can reference it; the same mapping is validated
-    programmatically by `GroundingChecker.check()` (§5.5, coming later).
+    The citation map is the authority for both the blocks and the legend:
+    a marker in the prompt is exactly a marker `GroundingChecker` can
+    resolve afterwards.
     """
 
     def build(
@@ -74,7 +76,7 @@ class GroundingPromptBuilder:
                 "prompt query must be a non-empty string",
                 code="empty_embedding_input",
             )
-        if not ctx.chunks:
+        if not ctx.citation_mapping:
             # No evidence — the model must abstain rather than invent.
             system_content = (
                 "You are a technical-document assistant. Answer ONLY from "
@@ -89,19 +91,19 @@ class GroundingPromptBuilder:
                 f"Answer based only on the context above."
             )
         else:
-            # Build context blocks in provenance order (§5.4 sketch:
-            # filename.pdf p.12 (chunk_id) + preview).
+            # Build context blocks in citation-marker order (§5.4 sketch:
+            # filename.pdf p.12 (chunk_id) + passage text).
+            ordered = sorted(ctx.citation_mapping.items())
             blocks = []
-            for i, chunk in enumerate(ctx.chunks, start=1):
+            for marker, chunk in ordered:
                 provenance = f"{chunk.filename or 'unknown'}"
                 if chunk.page is not None:
                     provenance += f" p.{chunk.page}"
                 provenance += f" ({chunk.chunk_id})"
-                preview = chunk.content[:200] + (" ..." if len(chunk.content) > 200 else "")
-                blocks.append(f'[citation:{i}] {provenance}\n"{preview}"')
+                blocks.append(f'[citation:{marker}] {provenance}\n"{chunk.content}"')
             context_text = "\n\n".join(blocks)
             citation_legend = ", ".join(
-                f"[{i}]: {chunk.chunk_id}" for i, chunk in enumerate(ctx.chunks, start=1)
+                f"[{marker}]: {chunk.chunk_id}" for marker, chunk in ordered
             )
             system_content = (
                 "You are a technical-document assistant. Answer ONLY from "
