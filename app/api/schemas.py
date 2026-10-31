@@ -15,17 +15,13 @@ No live model is called by this module; it only validates and serialises.
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field, field_validator
-
-from app.domain.errors import ValidationError
 
 __all__ = [
     "AnswerResponse",
-    "QueryRequest",
     "DocumentListResponse",
     "HealthResponse",
+    "QueryRequest",
     "ReadyResponse",
 ]
 
@@ -40,7 +36,7 @@ class QueryRequest(BaseModel):
 
     @field_validator("question")
     @classmethod
-    def _reject_empty_or_whitespace_only(cls, value: str) -> str:  # noqa: N805
+    def _reject_empty_or_whitespace_only(cls, value: str) -> str:
         stripped = value.strip()
         if not stripped:
             raise ValueError("question must not be empty or whitespace-only")

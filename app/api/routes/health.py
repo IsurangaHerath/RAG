@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.schemas import HealthResponse, ReadyResponse
 from app.api.deps import get_chroma_index, get_llm_client
+from app.api.schemas import HealthResponse, ReadyResponse
 from app.generation.llm_client import LLMClient
 
 router = APIRouter(tags=["health"])

@@ -10,15 +10,13 @@ raises `ConfigurationError` (not `api/deps.py`), so routes stay clean.
 
 from __future__ import annotations
 
-from collections.abc import Generator
-
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, status
 
 from app.config import Settings, get_settings
 from app.generation.llm_client import LLMClient
 from app.storage.chroma import ChromaIndex
 
-__all__ = ["get_settings_dep", "get_chroma_index", "get_llm_client"]
+__all__ = ["get_chroma_index", "get_llm_client", "get_settings_dep"]
 
 
 def get_settings_dep() -> Settings:

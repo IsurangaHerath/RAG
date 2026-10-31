@@ -13,7 +13,6 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.schemas import AnswerResponse, HealthResponse, QueryRequest, ReadyResponse
-from app.generation.prompts import ABSTENTION_PHRASE
 
 
 def test_query_request_rejects_empty_question() -> None:
@@ -25,16 +24,19 @@ def test_answer_response_never_carries_chunk_content() -> None:
     response = AnswerResponse(
         query="q",
         text="It is 2% [1].",
-        citations=[{"marker": 1, "chunk_id": "d:0"}],
+        citations=[{"marker": 1, "chunk_id": "d:0", "doc_id": "d"}],
         grounded=True,
+        abstained=False,
     )
     payload = response.model_dump()
 
     assert payload["text"] == "It is 2% [1]."
     assert payload["citations"][0]["chunk_id"] == "d:0"
     # The full chunk text is never part of the response contract.
-    assert "preview" not in payload
     assert "content" not in payload
+    for citation in payload.get("citations", []):
+        assert "content" not in citation
+        assert "text" not in citation
 
 
 def test_health_endpoints_shape() -> None:

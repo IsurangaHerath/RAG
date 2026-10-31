@@ -18,8 +18,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.schemas import AnswerResponse, QueryRequest
 from app.api.deps import get_chroma_index, get_llm_client
+from app.api.schemas import AnswerResponse, QueryRequest
 from app.generation.chain import GroundedAnswerPipeline
 
 router = APIRouter(prefix="/v1", tags=["query"])
