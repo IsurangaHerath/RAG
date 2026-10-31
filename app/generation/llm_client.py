@@ -27,6 +27,7 @@ follows (§5.13).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any, Protocol, cast
 
 import openai
@@ -55,6 +56,14 @@ class LLMClientProtocol(Protocol):
         temperature: float = 0.0,
         max_tokens: int | None = None,
     ) -> list[BaseMessage]: ...
+
+    def stream(
+        self,
+        messages: list[BaseMessage],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> Iterator[str]: ...
 
 
 class _ClientLike(Protocol):
@@ -206,3 +215,46 @@ class LLMClient:
             code="llm_invalid_response",
             detail=type(result).__name__,
         )
+
+    def stream(
+        self,
+        messages: list[BaseMessage],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> Iterator[str]:
+        """Stream assistant response chunks as strings.
+
+        Each yielded chunk is a fragment of the answer text (not a full
+        message); the caller accumulates them. Provider errors are
+        translated through the same mapping as `generate_messages()` and
+        raised at accumulation time, so a rate limit or auth failure
+        surfaces with the typed code rather than an untyped stream break.
+        """
+        client = self._require_client()
+        try:
+            # `ChatOpenAI.stream()` yields `AIMessageChunk` objects; we
+            # accumulate their text content so callers receive plain
+            # strings without importing langchain chunk types.
+            stream_result = client.stream(
+                messages,
+                config={"temperature": temperature, "max_tokens": max_tokens},
+            )
+            for chunk_obj in stream_result:
+                chunk_text: str = ""
+                if hasattr(chunk_obj, "content") and isinstance(chunk_obj.content, str):
+                    chunk_text = chunk_obj.content
+                elif hasattr(chunk_obj, "text") and isinstance(chunk_obj.text, str):
+                    chunk_text = chunk_obj.text
+                elif isinstance(chunk_obj, str):
+                    chunk_text = chunk_obj
+                if chunk_text:
+                    yield chunk_text
+        except openai.OpenAIError as exc:
+            raise _translate(exc) from exc
+        except Exception as exc:
+            raise DependencyError(
+                "Unexpected failure during streaming from the OpenAI provider",
+                code="dependency_unavailable",
+                detail=type(exc).__name__,
+            ) from exc

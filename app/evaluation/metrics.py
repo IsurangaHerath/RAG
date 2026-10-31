@@ -29,6 +29,13 @@ from collections.abc import Collection, Mapping, Sequence
 import numpy as np
 
 __all__ = [
+    "MIN_F1_AT_K",
+    "MIN_MRR",
+    "MIN_NDCG_AT_K",
+    "MIN_PRECISION_AT_K",
+    "MIN_RECALL_AT_K",
+    "EvaluationRegressionError",
+    "check_regression",
     "f1_at_k",
     "mean_reciprocal_rank",
     "normalized_dcg_at_k",
@@ -178,3 +185,49 @@ def retrieval_metrics_for_query(
         "k": float(k),
         "retrieved_count": float(len(retrieved_ids)),
     }
+
+
+MIN_PRECISION_AT_K: float = 0.5
+MIN_RECALL_AT_K: float = 0.5
+MIN_F1_AT_K: float = 0.5
+MIN_MRR: float = 0.5
+MIN_NDCG_AT_K: float = 0.3
+
+
+class EvaluationRegressionError(Exception):
+    """A computed metric fell below its configured regression floor."""
+
+    def __init__(
+        self,
+        metric: str,
+        value: float,
+        threshold: float,
+        query_id: str | None = None,
+    ) -> None:
+        self.metric = metric
+        self.value = value
+        self.threshold = threshold
+        self.query_id = query_id
+        super().__init__(
+            f"Regression failure: {metric}={value:.3f} (threshold {threshold})"
+            + (f" on query '{query_id}'" if query_id else "")
+        )
+
+
+def check_regression(
+    metrics: dict[str, float],
+    query_id: str | None = None,
+) -> None:
+    thresholds = {
+        "precision_at_k": MIN_PRECISION_AT_K,
+        "recall_at_k": MIN_RECALL_AT_K,
+        "f1_at_k": MIN_F1_AT_K,
+        "mrr": MIN_MRR,
+        "ndcg_at_k": MIN_NDCG_AT_K,
+    }
+    for metric, floor in thresholds.items():
+        value = metrics.get(metric)
+        if value is None:
+            continue
+        if float(value) < float(floor):
+            raise EvaluationRegressionError(metric, float(value), float(floor), query_id)

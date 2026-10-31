@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from types import SimpleNamespace
 
 import openai
@@ -225,6 +225,22 @@ class FakeLLMClient:
         if isinstance(self.reply, str):
             return [AIMessage(content=self.reply)]
         return list(self.reply)
+
+    def stream(
+        self,
+        messages: list[BaseMessage],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> Iterator[str]:
+        """Yield chunks as strings for streaming tests."""
+        self.calls.append((list(messages), temperature, max_tokens))
+        if self.error is not None:
+            raise self.error
+        reply_text = self.reply if isinstance(self.reply, str) else ""
+        words = reply_text.split()
+        for i, word in enumerate(words):
+            yield word + (" " if i < len(words) - 1 else "")
 
 
 class FakeChunkStore:

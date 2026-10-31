@@ -27,7 +27,7 @@ rather than being returned as if it were verified.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Any, Protocol
 
 from langchain_core.messages import BaseMessage
@@ -108,6 +108,18 @@ class QueryPipeline(Protocol):
         temperature: float = 0.0,
         max_tokens: int | None = None,
     ) -> Answer: ...
+
+    def stream(
+        self,
+        query: str,
+        *,
+        filter_applied: dict[str, Any] | None = None,
+        k: int = 20,
+        budget_tokens: int = 3000,
+        history: Sequence[str] | None = None,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> Iterator[str]: ...
 
 
 class GroundedAnswerPipeline:
@@ -244,4 +256,32 @@ class GroundedAnswerPipeline:
             grounded=check.grounded,
             abstained=check.abstained,
             reason=check.reason,
+        )
+
+    def stream(
+        self,
+        query: str,
+        *,
+        filter_applied: dict[str, Any] | None = None,
+        k: int = 20,
+        budget_tokens: int = 3000,
+        history: Sequence[str] | None = None,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> Iterator[str]:
+        """Stream assistant response chunks without blocking for the full text."""
+        if self._llm is None:
+            raise ConfigurationError(
+                "Streaming requires an LLM client; construct "
+                "GroundedAnswerPipeline(llm_client=...)",
+                code="llm_not_configured",
+            )
+        context = self.retrieve_context(
+            query, filter_applied=filter_applied, k=k, budget_tokens=budget_tokens
+        )
+        messages = self._prompt_builder.build(query=query, ctx=context, history=history)
+        return self._llm.stream(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
