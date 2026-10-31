@@ -1,13 +1,7 @@
 # Technical Document Intelligence — RAG
 
-> **Status: answer generation is wired — citation-verified `Answer` objects,
-> `ChatOpenAI` adapter, and full context evidence (§5.5) are implemented.**
-> Storage (§5.3), retrieval (§5.4), citation parsing/verification (§5.5),
-> and the query pipeline (§6.2) are built and tested offline. The live LLM
-> adapter works (stubbed in CI); no real OpenAI call is made by the suite,
-> and retrieval accuracy, answer quality, latency and API cost are
-> **not yet measured**.
-> **1150 tests passing** (0 failures, all offline — 63 new).
+> **Status: API transport layer started (§5.6) — Pydantic schemas, query/health routes, dependency providers; streaming response (next), evaluation regression gate (pending thresholds), and Docker deploy remain.** Storage (§5.3), retrieval (§5.4), citation parsing/verification (§5.5), evaluation package (§5.8), query pipeline (§6.2) and streaming (§5.5) are implemented and tested offline. The live LLM adapter works (stubbed); no real OpenAI call is made by the suite.
+> **1178 tests passing** (0 failures, all offline — 28 new since last sync).
 > See [Project status](#project-status) for exactly what does and does not work.
 
 A Retrieval-Augmented Generation (RAG) system for technical documents: upload
@@ -220,10 +214,10 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
 - ✅ `Citation` and `Answer` domain models with validation, `to_dict()`, `summary()` redacted payloads
 - ✅ Evaluation package (`metrics.py`, `runner.py`) with P@k, R@k, F1@k, MRR, nDCG; golden dataset; CSV and Markdown reports; no model required to score retrieval
 - ✅ Prompt layer passes full budgeted evidence (not previews); citation legend matches `citation_mapping`
-- ⬜ Streaming responses (`LLMClient.generate_messages` supports list response; streaming is next)
-- ⬜ Evaluation metrics configured with thresholds and regression gate (§5.8); evaluation runs are reproducible, but no benchmark results exist yet
-- ⬜ Query and document-management API endpoints (Stages 53–57)
-- ⬜ Docker image and Compose deployment (Stages 58–60)
+- ✅ Streaming responses (`LLMClient.stream()`, `GroundedAnswerPipeline.stream()`)
+- ✅ Evaluation regression gate (threshold floors, `check_regression()`, `EvaluationRegressionError`)
+- ⬜ Query and document-management API endpoints (Stages 53-57)
+- ⬜ Docker image and Compose deployment (Stages 58-60)
 
 **Not yet measured:** retrieval accuracy, answer quality, latency and API cost.
 No figures are quoted anywhere in this repository because none have been
