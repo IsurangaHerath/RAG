@@ -1,19 +1,12 @@
 # Technical Document Intelligence — RAG
 
-> **Status: stage 31 of 60.** Storage (§5.3) complete — read (`similarity_search`,
-> Stage 30) + write (`upsert`/`delete_document`/`count`, Stage 24) — and
-> retrieval (§5.4) started: `retriever.py` with MMR diversity selection
-> (`MMR_LAMBDA` = 0.7, adjustable 0–1) over `RetrievalQuery` (standalone
-> question + optional `filter`). The retrieval layer (`scoring`, `filters`,
-> `thresholds`, `diagnostics`, `reranker` integration) continues.
-> **1011 tests passing** (0 failures, all offline — no live OpenAI call
-> made at any stage).
-> complete. File discovery and loading (TXT, Markdown and PDF) and splitting
-> that text into page- and section-attributed chunks now work and are tested;
-> the embedding layer (contract, OpenAI adapter, batching and bounded
-> retries, and the chunk→vector embed step) is built and tested offline but
-> **not yet wired into a pipeline**, and retrieval and answer-generation are
-> **designed but not yet implemented**. No benchmark results exist yet.
+> **Status: retrieval and citation verification implemented; live answer
+> generation is the remaining wiring.** Storage (§5.3), retrieval (§5.4),
+> context assembly and prompt construction, the LLM adapter, and
+> programmatic citation checking are built and tested offline. No live
+> OpenAI call is made by the suite, and retrieval accuracy, answer
+> quality, latency and API cost are **not yet measured**.
+> **1087 tests passing** (0 failures, all offline).
 > See [Project status](#project-status) for exactly what does and does not work.
 
 A Retrieval-Augmented Generation (RAG) system for technical documents: upload
@@ -202,27 +195,29 @@ component responsibilities and interfaces, security notes, and risk/cost analysi
   chroma; raw cosine distance returned unconverted, nearest-first; error
   policy distinguishes ``ValueError`` from chroma's malformed ``where``
   clauses → ``ValidationError`` / ``invalid_filter``)
-- ✅ The retrieval retriever (`retrieval/retriever.py`, Stage 31): `RetrievalQuery` model, `Retriever` protocol, concrete `MMRRetriever` (MMR `lambda=0.7`, nearest-first, respects `k`, uses same `Embedder` as index); `MMR_LAMBDA` exported
+- ✅ The retrieval layer: MMR diversity selection over `RetrievalQuery`,
+  distance-to-score conversion, validated metadata filters, an optional
+  score threshold, and a developer-only inspector — plus the integration
+  that turns retrieval results into a `GroundedContext` (§6.2)
+- ✅ Grounded-generation building blocks: prompt assembly with `[n]`
+  citation rules and the fixed abstention phrase, a lazy `ChatOpenAI`
+  adapter that checks the key before constructing a client, and
+  programmatic citation verification (`generation/citations.py`) that
+  rejects unknown markers, flags uncited answers, and recognises a
+  faithful abstention
 - ✅ The `index` CLI command (Stage 29): builds the embedder, Chroma
   collection and registry from settings, runs the batch pass, prints
   the index report with typed error codes; missing ``OPENAI_API_KEY``
   stops before any storage touch
-- ✅ **1011 tests passing**, with chunking, embedding, pipeline, retrieval (`retriever`), storage (read + write), CLI (`prepare`/`ingest`/`index`) and domain model at 100% branch coverage
+- ✅ **1087 tests passing**, with chunking, embedding, pipeline, retrieval,
+  storage (read + write), CLI (`prepare`/`ingest`/`index`), citation
+  verification and domain models at or near full branch coverage
 
-**Planned — retrieval layer continues (Stages 31–36):**
+**Remaining work:**
 
-- ✅ `RetrievedChunk` domain model + `similarity_search` read path on Chroma
-  (raw cosine distance; embedder wired through constructor; `embedder_not_configured`
-  when missing; `invalid_filter` / `invalid_top_k` typed errors before any
-  chroma call) — this stage
-- ✅ `retrieval/retriever.py` top-k + MMR diversity (Stage 31)
-- ⬜ `retrieval/scoring.py` distance → score conversion, justified (Stage 32)
-- ⬜ `retrieval/filters.py` validated `MetadataFilter` (Stage 33)
-- ⬜ `retrieval/thresholds.py` optional score threshold (Stage 34)
-- ⬜ `retrieval/diagnostics.py` dev-only retrieval inspector (not routed) (Stage 35)
-- ⬜ Integration: retrieval wired into the query pipeline (§6.2) (Stage 36)
-- ⬜ Grounded answer generation with citations (Stages 37–44)
-- ⬜ Grounded answer generation with citations (Stages 37–44)
+- ⬜ Wire `LLMClient` into the answer path so a `GroundedContext` becomes
+  an `Answer`, and run `validate_citations()` on the model output
+- ⬜ `Citation` and `Answer` domain models, streaming responses
 - ⬜ Evaluation metrics and configuration experiments (Stages 45–52)
 - ⬜ Query and document-management API endpoints (Stages 53–57)
 - ⬜ Docker image and Compose deployment (Stages 58–60)

@@ -291,7 +291,10 @@ def test_an_unopenable_root_becomes_a_dependency_error(tmp_path: Path) -> None:
         store.save(io.BytesIO(b"bytes"), doc_id=DOC_ID)
 
     assert excinfo.value.code == "dependency_unavailable"
-    assert "FileExistsError" in (excinfo.value.detail or "")
+    # The errno depends on the platform: FileExistsError on Windows,
+    # NotADirectoryError on POSIX. The typed error is what callers see.
+    detail = excinfo.value.detail or ""
+    assert any(name in detail for name in ("FileExistsError", "NotADirectoryError"))
 
 
 def test_save_then_path_for_returns_the_stored_bytes(file_store: FileStore) -> None:

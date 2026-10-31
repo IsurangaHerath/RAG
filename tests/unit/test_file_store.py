@@ -120,7 +120,10 @@ def test_a_blocked_root_reports_dependency_trouble(tmp_path: Path) -> None:
         store.save(io.BytesIO(b"bytes"), doc_id=DOC_ID)
 
     assert excinfo.value.code == "dependency_unavailable"
-    assert "FileExistsError" in (excinfo.value.detail or "")
+    # Writing below a file fails at the OS level, but the errno differs:
+    # Windows reports FileExistsError, POSIX reports NotADirectoryError.
+    detail = excinfo.value.detail or ""
+    assert any(name in detail for name in ("FileExistsError", "NotADirectoryError"))
     assert blocked.read_text(encoding="utf-8") == "occupied", "the blocker survives"
 
 

@@ -1137,6 +1137,26 @@ class GroundingChecker(Protocol):
 
 **Grounding contract enforced by the system prompt**: answer only from `<context>`; cite `[n]` markers for every factual sentence; if the context does not contain the answer, reply with the fixed insufficient-information phrase (surfaced as `grounded=False`). Citations are then validated programmatically — a citation to an unknown chunk is an error, not a hallucination that leaks through.
 
+**Implemented pieces** (all testable offline, no live model call):
+
+- `generation/prompts.py` — `GroundingPromptBuilder` builds the system
+  rules, evidence blocks in provenance order, the `[n]` citation legend,
+  and the fixed `ABSTENTION_PHRASE`.
+- `generation/context_builder.py` — `SimpleContextBuilder` orders
+  `RetrievedChunk`s by provenance and applies an approximate character
+  budget, setting `GroundedContext.truncated` when evidence is dropped.
+- `generation/llm_client.py` — `LLMClient` constructs `ChatOpenAI`
+  lazily, verifies `OPENAI_API_KEY` before any client exists, and maps
+  provider failures onto the shared error hierarchy.
+- `generation/citations.py` — `extract_citation_markers()` finds distinct
+  `[n]` markers in order; `is_abstention()` recognises the fixed phrase;
+  `GroundingChecker.inspect()` returns a `CitationCheck` whose
+  `grounded` flag is true only when every marker resolves; and
+  `validate_citations()` raises `ValidationError` (`invalid_citation`)
+  for a marker that names no chunk in `citation_mapping`. Uncited answers
+  and faithful abstentions return `grounded=False` with a machine-readable
+  `reason` instead of raising.
+
 ### 5.6 API layer
 
 Responsibility: transport, validation, auth, rate limits, and dependency wiring only — no business logic.
