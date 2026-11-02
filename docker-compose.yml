@@ -1,0 +1,59 @@
+# Technical Document Intelligence RAG — container orchestration (§9, Stage 59)
+# Services: api (stateless FastAPI), chroma (persistent vector store),
+# optional redis (future queue), and the data volumes.
+# The `api` service is stateless; `chroma` owns writes; `upload_data`
+# holds source files outside the container root (§10, isolation).
+version: "3.9"
+
+services:
+  api:
+    build: .
+    image: rag-api:latest
+    container_name: rag-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data/uploads
+      - CHROMA_PERSIST_DIR=/data/chroma
+    volumes:
+      - upload_data:/data/uploads
+      - chroma_data:/data/chroma
+    depends_on:
+      - chroma
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=1)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    # Non-root user is baked into the image (§10); no `user:` override needed.
+
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: rag-chroma
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: rag-redis
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    # Optional: the worker queue will connect here once `arq` lands.
+
+volumes:
+  upload_data:
+    driver: local
+  chroma_data:
+    driver: local
+  redis_data:
+    driver: local

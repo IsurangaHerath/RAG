@@ -1,0 +1,4 @@
+# Technical Document Intelligence RAG — Docker helpers (§9, Stage 58)
+# Multi-stage build: builder (full dependencies) -> runtime (slim, non-root).
+# The `Dockerfile` lives at the repo root; this folder holds auxiliary
+# scripts for building, scanning and deploying the container.
