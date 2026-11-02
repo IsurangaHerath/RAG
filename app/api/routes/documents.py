@@ -18,6 +18,6 @@ router = APIRouter(prefix="/v1/documents", tags=["documents"])
 
 
 @router.get("")
-async def list_documents() -> dict:
+async def list_documents() -> dict[str, Any]:
     """Placeholder: real implementation delegates to registry (section 5.3.2)."""
     return {"results": [], "total": 0}

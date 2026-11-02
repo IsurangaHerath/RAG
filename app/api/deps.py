@@ -43,7 +43,7 @@ def get_chroma_index(settings: Settings = Depends(get_settings_dep)) -> ChromaIn
         ) from exc
 
     return ChromaIndex(
-        persist_directory=settings.chroma_persist_directory,
+        persist_directory=settings.chroma_persist_dir,
         embedder=embedder,
     )
 

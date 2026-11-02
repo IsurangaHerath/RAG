@@ -14,8 +14,7 @@ No document text reaches the response except the redacted `Answer.text`.
 
 from __future__ import annotations
 
-from typing import Any
-
+from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_chroma_index, get_llm_client
@@ -28,8 +27,8 @@ router = APIRouter(prefix="/v1", tags=["query"])
 @router.post("/query", response_model=AnswerResponse)
 async def query_endpoint(
     body: QueryRequest,
-    index=Depends(get_chroma_index),
-    llm_client=Depends(get_llm_client),
+    index: ChromaIndex = Depends(get_chroma_index),
+    llm_client: LLMClient = Depends(get_llm_client),
 ) -> Any:
     """Run the grounded query pipeline (section 6.2) and return a verified `Answer`."""
     pipeline = GroundedAnswerPipeline(index=index, llm_client=llm_client)
@@ -48,7 +47,10 @@ async def query_endpoint(
     return AnswerResponse(
         query=answer.query,
         text=answer.text,
-        citations=[{"marker": c.marker, "chunk_id": c.chunk_id} for c in answer.citations],
+        citations=[
+            {"marker": c.marker, "chunk_id": c.chunk_id, "doc_id": c.doc_id}
+            for c in answer.citations
+        ],
         grounded=answer.grounded,
         abstained=answer.abstained,
         reason=answer.reason,

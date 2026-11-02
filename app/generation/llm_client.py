@@ -77,6 +77,8 @@ class _ClientLike(Protocol):
         self, messages: list[BaseMessage], **kwargs: Any
     ) -> BaseMessage | list[BaseMessage]: ...
 
+    def stream(self, messages: list[BaseMessage], **kwargs: Any) -> Iterator[str]: ...
+
 
 def _translate(exc: openai.OpenAIError) -> RAGError:
     """Map one provider exception onto the shared hierarchy.

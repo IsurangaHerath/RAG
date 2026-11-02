@@ -26,8 +26,8 @@ async def healthz() -> HealthResponse:
 
 @router.get("/readyz", response_model=ReadyResponse)
 async def readyz(
-    index=Depends(get_chroma_index),
-    llm_client=Depends(get_llm_client),
+    index: ChromaIndex = Depends(get_chroma_index),
+    llm_client: LLMClient = Depends(get_llm_client),
 ) -> ReadyResponse:
     """Readiness: Chroma index and LLM adapter are configured (section 5.6).
 
