@@ -1,4 +1,4 @@
-"""Tests for Docker deployment artifacts (§9, Stage 58-60).
+"""Tests for Docker deployment artifacts (Section9, Stage 58-60).
 
 These prove the container builds without errors, the compose file
 references only declared services and volumes, and no secret is baked
