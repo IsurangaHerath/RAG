@@ -383,6 +383,10 @@ Development follows 60 numbered stages grouped into 10 phases:
 Each stage is pushed as its own commit. See [`ARCHITECTURE.md` Section13](ARCHITECTURE.md)
 for the implementation order.
 
+## Practice Update
+
+Learning GitHub pull requests and collaboration.
+
 ## License
 
 MIT — see [`pyproject.toml`](pyproject.toml).
