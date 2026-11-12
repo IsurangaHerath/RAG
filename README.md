@@ -1,5 +1,4 @@
-# Rag System 
-# Technical Document Intelligence
+# Technical Document Intelligence — RAG system
 
 > **Status: API transport layer started (section 5.6) — Pydantic schemas, query/health routes, dependency providers; streaming response (next), evaluation regression gate (pending thresholds), and Docker deploy remain.** Storage (section 5.3), retrieval (section 5.4), citation parsing/verification (section 5.5), evaluation package (section 5.8), query pipeline (section 6.2) and streaming (section 5.5) are implemented and tested offline. The live LLM adapter works (stubbed); no real OpenAI call is made by the suite.
 > **1178 tests passing** (0 failures, all offline — 28 new since last sync).
