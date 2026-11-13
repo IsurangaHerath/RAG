@@ -1,4 +1,4 @@
-# Technical Document Intelligence RAG — multi-stage Docker build (§9, Stage 58)
+# Technical Document Intelligence RAG — multi-stage Docker build (Stage 58)
 # Builder installs pinned dependencies; runtime uses python:3.12-slim,
 # non-root user (`rag`), and only the installed package plus data volumes.
 # Secrets (`OPENAI_API_KEY`) are injected at deploy time, never baked.
